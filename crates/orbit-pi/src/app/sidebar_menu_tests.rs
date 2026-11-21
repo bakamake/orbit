@@ -312,3 +312,82 @@ fn row_menus_list_each_entry_once_and_disable_moves_at_the_edges() {
     ids.dedup();
     assert_eq!(ids.len(), items.len());
 }
+
+/// The task menu offers Branch from… beside Clone, above the destructive
+/// Delete (#166), and the project menu offers Rename… (#166).
+#[test]
+fn task_menu_offers_branch_and_project_menu_offers_rename() {
+    let menu = SessionMenu {
+        path: PathBuf::from("/m/s.jsonl"),
+        title: "s".into(),
+        deletable: true,
+        confirm_delete: false,
+        at: None,
+        reorderable: false,
+        can_move_up: false,
+        can_move_down: false,
+        cursor: Default::default(),
+    };
+    let items: Vec<_> = session_menu_items(&menu).into_iter().map(|(i, _)| i).collect();
+    let clone = items.iter().position(|i| *i == RowMenuItem::Clone).unwrap();
+    assert_eq!(items[clone + 1], RowMenuItem::Branch);
+    assert_eq!(items.last(), Some(&RowMenuItem::Delete));
+    assert_eq!(RowMenuItem::Branch.id(), "menu-branch");
+    assert_eq!(RowMenuItem::RenameProject.id(), "wm-rename");
+}
+
+/// Delete waits only for a run in flight: the open session at rest can be
+/// deleted (confirming stops its process first), a busy one cannot (#166).
+#[gpui::test]
+fn only_a_run_in_flight_blocks_deleting_the_open_session(cx: &mut gpui::TestAppContext) {
+    let app = test_app(cx);
+    app.update(cx, |app, _| {
+        let path = PathBuf::from("/sessions/open.jsonl");
+        app.current_session_path = Some(path.clone());
+        assert!(!app.session_delete_blocked(&path), "idle and open");
+        app.busy = true;
+        assert!(app.session_delete_blocked(&path), "a run in flight");
+        assert!(
+            !app.session_delete_blocked(Path::new("/sessions/other.jsonl")),
+            "another session is not held by this run"
+        );
+    });
+}
+
+/// Branch from… on a session that is not open waits for pi to load it, like
+/// Rename, and only then asks for the message picker.
+#[gpui::test]
+fn branch_from_waits_for_the_target_session_state(cx: &mut gpui::TestAppContext) {
+    let app = test_app(cx);
+    app.update(cx, |app, cx| {
+        let path = PathBuf::from("/tmp/branch-target.jsonl");
+        app.current_session_path = Some(path.clone());
+        app.pending_session_branch = Some(path);
+        let mut refresh = false;
+        app.on_response(
+            "get_state",
+            true,
+            Some(&serde_json::json!({"sessionFile": "/tmp/other.jsonl"})),
+            None,
+            "test",
+            &mut refresh,
+            cx,
+        );
+        assert!(!app.session_branch_ready);
+        app.on_response(
+            "get_state",
+            true,
+            Some(&serde_json::json!({"sessionFile": "/tmp/branch-target.jsonl"})),
+            None,
+            "test",
+            &mut refresh,
+            cx,
+        );
+        assert!(app.session_branch_ready);
+        assert!(app.pending_session_branch.is_none());
+        // A failed switch drops a branch that can no longer open.
+        app.pending_session_branch = Some(PathBuf::from("/tmp/branch-target.jsonl"));
+        app.on_response("switch_session", false, None, Some("nope"), "test", &mut refresh, cx);
+        assert!(app.pending_session_branch.is_none());
+    });
+}

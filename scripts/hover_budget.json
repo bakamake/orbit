@@ -10,8 +10,8 @@
   "app/skills_ui.rs": 1,
   "app/subagents_ui.rs": 3,
   "app/updater_ui.rs": 2,
-  "app/view.rs": 13,
-  "app/worktrees.rs": 3,
+  "app/view.rs": 11,
+  "app/worktrees.rs": 4,
   "branch_picker.rs": 2,
   "explorer/panel.rs": 1,
   "git_panel/mod.rs": 11,
@@ -22,6 +22,7 @@
   "transcript_view.rs": 9,
   "ui/button.rs": 13,
   "ui/chip.rs": 2,
+  "ui/choice.rs": 1,
   "ui/chrome.rs": 1,
   "ui/rail.rs": 1,
   "ui/resize.rs": 2,
@@ -33,5 +34,5 @@
   "ui/tree.rs": 1,
   "usage/filters.rs": 2,
   "usage/view.rs": 4,
-  "workspace_picker.rs": 3
+  "workspace_picker.rs": 2
 }

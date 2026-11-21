@@ -1461,9 +1461,6 @@ pub(crate) fn render_side_row(
     show_first_message: bool,
     show_updated: bool,
     show_shortcuts: bool,
-    // Every session with a live (running or warm-idle) pi process. Guards
-    // delete, which would otherwise let an alive process recreate the file.
-    live_paths: &Rc<HashSet<PathBuf>>,
     // Per-workspace sidebar marks (icon + tint), keyed by path.
     marks: &Rc<HashMap<PathBuf, WorkspaceMark>>,
     // Resolved per-workspace glyphs: the user's mark icon, or the folder
@@ -1642,11 +1639,15 @@ pub(crate) fn render_side_row(
                         IconSize::XSmall.px(&theme),
                         theme.text_muted,
                     ))
+                    // The project mark and name are the sidebar's group
+                    // anchors: a full-size glyph and a semibold name so they
+                    // read at a glance over the sessions below, CJK names
+                    // included (#166).
                     .child(project_icon(
                         &mark,
                         workspace_logo,
                         workspace_icon,
-                        IconSize::Small,
+                        IconSize::Medium,
                         &theme,
                     ))
                     .child(
@@ -1655,11 +1656,11 @@ pub(crate) fn render_side_row(
                             .min_w_0()
                             .truncate()
                             .text_size(TextSize::Default.px(&theme))
-                            .font_weight(FontWeight::MEDIUM)
+                            .font_weight(FontWeight::SEMIBOLD)
                             // Keep the user's project hue on the name as
                             // well as its mark (issue #78).
                             .text_color(workspace_mark::label_ink(&theme, mark.tint.as_deref()))
-                            .child(label.clone()),
+                            .child(mark.display_name(&label).to_string()),
                     )
                     // Row actions, revealed on hover: a `…` menu
                     // (remove / copy path) beside the direct new-task `+`.
@@ -1927,9 +1928,10 @@ pub(crate) fn render_side_row(
                 .map(|target| target.after);
             let drag_path = session.path.clone();
             let drag_title = session.title.clone();
-            // Sessions with a live pi process (running or warm) must not be
-            // deleted — the process would recreate the file mid-run.
-            let deletable = !active && !running && !live_paths.contains(&session.path);
+            // Only a run in flight blocks Delete. An open or warm idle
+            // session can go: confirming stops its pi process first, so
+            // nothing writes the file back (#166).
+            let deletable = !running;
             // Keep titles still; the status icon communicates background activity.
             let title = session_title(*ix, session.title.clone().into(), theme, false);
             // Indented under its workspace group so the list reads as a
@@ -2083,8 +2085,11 @@ pub(crate) fn render_side_row(
             // same sentence is cut, not redundant — the message line is the
             // only place the ask is readable.
             let message = session.first_message.trim().to_string();
-            let workspace_label = sessions::workspace_label(&session.cwd);
             let mark = marks.get(&session.cwd).cloned().unwrap_or_default();
+            // A renamed project's rows carry its custom name too (#166).
+            let workspace_label = mark
+                .display_name(&sessions::workspace_label(&session.cwd))
+                .to_string();
             let workspace_logo = logos.get(&session.cwd);
             let workspace_icon = workspace_icons.get(&session.cwd);
             let branch = branches.get(&session.cwd).cloned();
@@ -2435,11 +2440,13 @@ pub(crate) enum RowMenuItem {
     Archive,
     CopyPath,
     Clone,
+    Branch,
     Delete,
     ProjectMoveUp,
     ProjectMoveDown,
     ProjectCopyPath,
     Worktrees,
+    RenameProject,
     IconAndColor,
     ArchiveSessions,
     RemoveProject,
@@ -2457,11 +2464,13 @@ impl RowMenuItem {
             Self::Archive => "menu-archive",
             Self::CopyPath => "menu-copy-path",
             Self::Clone => "menu-clone",
+            Self::Branch => "menu-branch",
             Self::Delete => "menu-delete",
             Self::ProjectMoveUp => "wm-move-up",
             Self::ProjectMoveDown => "wm-move-down",
             Self::ProjectCopyPath => "wm-copy-path",
             Self::Worktrees => "wm-worktrees",
+            Self::RenameProject => "wm-rename",
             Self::IconAndColor => "wm-icon-color",
             Self::ArchiveSessions => "wm-archive",
             Self::RemoveProject => "wm-delete",
@@ -2484,6 +2493,7 @@ pub(super) fn session_menu_items(menu: &SessionMenu) -> Vec<(RowMenuItem, bool)>
         (RowMenuItem::Archive, true),
         (RowMenuItem::CopyPath, true),
         (RowMenuItem::Clone, true),
+        (RowMenuItem::Branch, true),
         (RowMenuItem::Delete, menu.deletable),
     ]);
     items
@@ -2496,6 +2506,7 @@ fn workspace_menu_items(menu: &WorkspaceMenu) -> Vec<(RowMenuItem, bool)> {
         (RowMenuItem::ProjectMoveDown, menu.can_move_down),
         (RowMenuItem::ProjectCopyPath, true),
         (RowMenuItem::Worktrees, true),
+        (RowMenuItem::RenameProject, true),
         (RowMenuItem::IconAndColor, true),
         (RowMenuItem::ArchiveSessions, true),
         (RowMenuItem::RemoveProject, true),
@@ -2574,9 +2585,11 @@ pub(crate) fn session_menu_popup(
 .render(&theme)
                             .on_mouse_down(MouseButton::Left, {
                                 let this = this.clone();
-                                move |_, _, cx| {
+                                move |_, window, cx| {
                                     cx.stop_propagation();
-                                    this.update(cx, |app, cx| app.on_menu_delete_confirm(cx));
+                                    this.update(cx, |app, cx| {
+                                        app.on_menu_delete_confirm(window, cx)
+                                    });
                                 }
                             })
                             .child(tr!("sidebar.delete")),
@@ -2691,6 +2704,15 @@ pub(crate) fn session_menu_popup(
                 false,
                 lit == Some("menu-clone"),
                 |app, cx| app.on_menu_clone_session(cx),
+            ))
+            .child(workspace_menu_item(
+                "menu-branch",
+                "icons/branch.svg",
+                tr!("sidebar.branch_from_message"),
+                theme,
+                this.clone(),
+                lit == Some("menu-branch"),
+                |app, window, cx| app.on_menu_branch_session(window, cx),
             ))
             // Delete is always listed. A session that is open or running
             // cannot be deleted — pi would recreate the file mid-run — but
@@ -2826,7 +2848,7 @@ fn workspace_menu_item<C, L>(
     on_click: C,
 ) -> impl IntoElement + use<C, L>
 where
-    C: Fn(&mut OrbitApp, &mut Context<OrbitApp>) + 'static,
+    C: Fn(&mut OrbitApp, &mut Window, &mut Context<OrbitApp>) + 'static,
     L: Into<SharedString>,
 {
     let label: SharedString = label.into();
@@ -2835,9 +2857,9 @@ where
             .h(picker::entry_height(&theme))
             .flex_none()
             .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 cx.stop_propagation();
-                this.update(cx, |app, cx| (on_click)(app, cx));
+                this.update(cx, |app, cx| (on_click)(app, window, cx));
             })
             .child(icon(
                 icon_path,
@@ -2920,7 +2942,10 @@ where
     if !enabled {
         return menu_item_unavailable(id, icon_path, label, reason.into().to_string(), theme);
     }
-    workspace_menu_item(id, icon_path, label, theme, this, highlighted, on_click).into_any_element()
+    workspace_menu_item(id, icon_path, label, theme, this, highlighted, move |app, _, cx| {
+        on_click(app, cx)
+    })
+    .into_any_element()
 }
 
 /// Move up / Move down for a project group's row menu.
@@ -3145,7 +3170,7 @@ pub(crate) fn workspace_menu_popup(
                 theme,
                 this.clone(),
                 lit == Some("wm-copy-path"),
-                |app, cx| app.on_workspace_copy_path(cx),
+                |app, _, cx| app.on_workspace_copy_path(cx),
             ))
             .child(workspace_menu_item(
                 "wm-worktrees",
@@ -3154,10 +3179,19 @@ pub(crate) fn workspace_menu_popup(
                 theme,
                 this.clone(),
                 lit == Some("wm-worktrees"),
-                |app, cx| {
+                |app, _, cx| {
                     app.workspace_menu = None;
                     app.open_worktrees(cx);
                 },
+            ))
+            .child(workspace_menu_item(
+                "wm-rename",
+                "icons/pencil.svg",
+                tr!("sidebar.rename_project"),
+                theme,
+                this.clone(),
+                lit == Some("wm-rename"),
+                |app, window, cx| app.on_workspace_rename(window, cx),
             ))
             .child(workspace_menu_item(
                 "wm-icon-color",
@@ -3166,7 +3200,7 @@ pub(crate) fn workspace_menu_popup(
                 theme,
                 this.clone(),
                 lit == Some("wm-icon-color"),
-                |app, cx| app.on_workspace_open_picker(cx),
+                |app, _, cx| app.on_workspace_open_picker(cx),
             ))
             .child(workspace_menu_item(
                 "wm-archive",
@@ -3175,7 +3209,7 @@ pub(crate) fn workspace_menu_popup(
                 theme,
                 this.clone(),
                 lit == Some("wm-archive"),
-                |app, cx| app.on_workspace_archive_sessions(cx),
+                |app, _, cx| app.on_workspace_archive_sessions(cx),
             ))
             .child(context_menu_separator(&theme))
             .child(workspace_menu_item(
@@ -3185,7 +3219,7 @@ pub(crate) fn workspace_menu_popup(
                 theme,
                 this.clone(),
                 lit == Some("wm-delete"),
-                |app, cx| app.on_workspace_delete(cx),
+                |app, _, cx| app.on_workspace_delete(cx),
             ))
             .child(workspace_menu_item_danger(
                 "wm-delete-files",
@@ -3285,8 +3319,8 @@ fn workspace_appearance_picker(
                 .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                     cx.stop_propagation();
                     let next = WorkspaceMark {
-                        icon: mark.icon.clone(),
                         tint: Some((*key).to_string()),
+                        ..mark.clone()
                     };
                     this.update(cx, |app, cx| {
                         app.set_workspace_mark(cwd.clone(), next);
@@ -3322,7 +3356,7 @@ fn workspace_appearance_picker(
                         cx.stop_propagation();
                         let next = WorkspaceMark {
                             icon: Some((*stem).to_string()),
-                            tint: mark.tint.clone(),
+                            ..mark.clone()
                         };
                         this.update(cx, |app, cx| {
                             app.set_workspace_mark(cwd.clone(), next);
@@ -4271,6 +4305,38 @@ impl OrbitApp {
         cx.notify();
     }
 
+    /// **Branch from…**: start a new task from an earlier message of this
+    /// one (#166). The open session goes straight to the message picker (the
+    /// palette's *Rewind to a message…*, which forks through pi's `fork`); any
+    /// other session is opened first and the picker follows once pi has
+    /// loaded it, the same handshake Rename uses.
+    pub(super) fn on_menu_branch_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.session_menu.take() else {
+            return;
+        };
+        if self.current_session_path.as_ref() == Some(&menu.path) {
+            self.open_rewind_picker(window, cx);
+            cx.notify();
+            return;
+        }
+        let Some(session) = self
+            .sessions
+            .iter()
+            .find(|session| session.path == menu.path)
+            .cloned()
+        else {
+            cx.notify();
+            return;
+        };
+        self.switch_to_session(session, true, cx);
+        // The picker needs pi's view of the session: wait for the switched
+        // process's `get_state` to name this file, which flips the ready flag.
+        if self.current_session_path.as_ref() == Some(&menu.path) && self.runtime_is_live() {
+            self.pending_session_branch = Some(menu.path);
+        }
+        cx.notify();
+    }
+
     pub(super) fn on_menu_copy_path(&mut self, cx: &mut Context<Self>) {
         if let Some(menu) = &self.session_menu {
             cx.write_to_clipboard(ClipboardItem::new_string(
@@ -4326,15 +4392,47 @@ impl OrbitApp {
         }
     }
 
+    /// Whether Delete must wait: the session has a run in flight, open or
+    /// parked. Deleting it then would abort work the user may still want,
+    /// and the process would write the file straight back.
+    pub(super) fn session_delete_blocked(&self, path: &Path) -> bool {
+        let open_and_busy = self.current_session_path.as_deref() == Some(path)
+            && (self.busy
+                || self.transcript.is_streaming()
+                || self.retrying
+                || self.is_compacting
+                || self.execution.status().is_in_progress());
+        open_and_busy || self.lives.get(path).is_some_and(|parked| parked.busy)
+    }
+
     /// Confirmed: remove the session file from disk and refresh the list.
-    pub(super) fn on_menu_delete_confirm(&mut self, cx: &mut Context<Self>) {
+    ///
+    /// An idle session may still have a pi process — the open one, or a warm
+    /// parked one. That process would write the file back, so it is stopped
+    /// first: the open session hands the window to a new task (which parks
+    /// it), and the parked process is dropped, which kills it (#166).
+    pub(super) fn on_menu_delete_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(menu) = self.session_menu.take() {
-            // Defensive: a warm parked process would recreate the file.
-            if self.lives.contains_key(&menu.path) {
+            if self.session_delete_blocked(&menu.path) {
                 self.toast_warning(tr!("sidebar.live_process_delete"));
                 cx.notify();
                 return;
             }
+            if self.current_session_path.as_ref() == Some(&menu.path) {
+                let cwd = self
+                    .current_workspace
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("."));
+                self.begin_new_task(cwd, window, cx);
+                // The switch can be refused (a rewind or an account switch in
+                // flight); the session is still open, so leave its file alone.
+                if self.current_session_path.as_ref() == Some(&menu.path) {
+                    cx.notify();
+                    return;
+                }
+            }
+            // Dropping the parked client kills its process.
+            self.lives.remove(&menu.path);
             if let Err(err) = fs::remove_file(&menu.path) {
                 self.toast_error(tr!("sidebar.delete_failed", error = err));
             } else {
@@ -5536,6 +5634,7 @@ impl OrbitApp {
             RowMenuItem::Archive => self.on_menu_toggle_archive(cx),
             RowMenuItem::CopyPath => self.on_menu_copy_path(cx),
             RowMenuItem::Clone => self.on_menu_clone_session(cx),
+            RowMenuItem::Branch => self.on_menu_branch_session(window, cx),
             RowMenuItem::Delete => self.on_menu_delete_request(cx),
             RowMenuItem::ProjectMoveUp | RowMenuItem::ProjectMoveDown => {
                 if let Some(label) = project_label {
@@ -5547,6 +5646,7 @@ impl OrbitApp {
                 self.workspace_menu = None;
                 self.open_worktrees(cx);
             }
+            RowMenuItem::RenameProject => self.on_workspace_rename(window, cx),
             RowMenuItem::IconAndColor => self.on_workspace_open_picker(cx),
             RowMenuItem::ArchiveSessions => self.on_workspace_archive_sessions(cx),
             RowMenuItem::RemoveProject => self.on_workspace_delete(cx),
@@ -5574,8 +5674,7 @@ impl OrbitApp {
                     return;
                 };
                 let (can_move_up, can_move_down) = self.session_move_flags(&session.path);
-                let deletable = self.current_session_path.as_ref() != Some(&session.path)
-                    && !self.lives.contains_key(&session.path);
+                let deletable = !self.session_delete_blocked(&session.path);
                 let mut menu = SessionMenu {
                     path: session.path.clone(),
                     title: session.title.clone(),
@@ -5770,7 +5869,7 @@ impl OrbitApp {
         self.session_menu = Some(SessionMenu {
             path: session.path.clone(),
             title: session.title,
-            deletable: !self.lives.contains_key(&session.path),
+            deletable: !self.session_delete_blocked(&session.path),
             confirm_delete: true,
             at: None,
             reorderable: self.sessions_reorderable(),
@@ -5855,7 +5954,6 @@ mod tests {
                 false,
                 self.show_updated,
                 false,
-                &Rc::default(),
                 &Rc::default(),
                 &Rc::default(),
                 &Rc::default(),

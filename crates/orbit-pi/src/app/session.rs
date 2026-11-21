@@ -1246,6 +1246,8 @@ impl OrbitApp {
         self.cancel_new_task_settle();
         self.pending_session_rename = None;
         self.session_rename_ready = false;
+        self.pending_session_branch = None;
+        self.session_branch_ready = false;
         self.settings_open = false;
         self.provider_editor = None;
         self.provider_key_editor = None;
@@ -1602,6 +1604,8 @@ impl OrbitApp {
         }
         self.pending_session_rename = None;
         self.session_rename_ready = false;
+        self.pending_session_branch = None;
+        self.session_branch_ready = false;
         // Opening a session means viewing the chat: leave whichever full-page
         // surface (GitHub / Usage) was covering the main area. Without this
         // the switch happens out of sight and the page stays up, so clicking

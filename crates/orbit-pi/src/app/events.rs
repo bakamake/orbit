@@ -438,6 +438,8 @@ impl OrbitApp {
                     let fork_interrupted = self.take_pending_fork();
                     self.pending_session_rename = None;
                     self.session_rename_ready = false;
+                    self.pending_session_branch = None;
+                    self.session_branch_ready = false;
                     self.busy = false;
                     self.retrying = false;
                     self.retry_detail = None;
@@ -1042,6 +1044,8 @@ impl OrbitApp {
             if matches!(command, "switch_session" | "get_state") {
                 self.pending_session_rename = None;
                 self.session_rename_ready = false;
+                self.pending_session_branch = None;
+                self.session_branch_ready = false;
             }
             if command == "get_state" {
                 // The branch reload a regenerate waits on never completed.
@@ -1263,17 +1267,26 @@ impl OrbitApp {
                     }
                     _ => {}
                 }
-                if let Some(path) = self.pending_session_rename.as_ref() {
-                    if self.current_session_path.as_ref() == Some(path)
-                        && data
-                            .get("sessionFile")
-                            .and_then(Value::as_str)
-                            .is_some_and(|file| std::path::Path::new(file) == path)
-                    {
-                        self.pending_session_rename = None;
-                        self.session_rename_ready = true;
-                        cx.notify();
-                    }
+                let loaded = |pending: Option<&PathBuf>| {
+                    pending.is_some_and(|path| {
+                        self.current_session_path.as_ref() == Some(path)
+                            && data
+                                .get("sessionFile")
+                                .and_then(Value::as_str)
+                                .is_some_and(|file| std::path::Path::new(file) == path)
+                    })
+                };
+                let rename_loaded = loaded(self.pending_session_rename.as_ref());
+                let branch_loaded = loaded(self.pending_session_branch.as_ref());
+                if rename_loaded {
+                    self.pending_session_rename = None;
+                    self.session_rename_ready = true;
+                    cx.notify();
+                }
+                if branch_loaded {
+                    self.pending_session_branch = None;
+                    self.session_branch_ready = true;
+                    cx.notify();
                 }
                 self.sync_model_selector(cx);
                 self.refresh_context_stats();

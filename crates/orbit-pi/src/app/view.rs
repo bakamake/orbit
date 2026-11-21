@@ -192,6 +192,10 @@ impl Render for OrbitApp {
             self.session_rename_ready = false;
             self.begin_session_rename(window, cx);
         }
+        if self.session_branch_ready {
+            self.session_branch_ready = false;
+            self.open_rewind_picker(window, cx);
+        }
         // A clicked banner asks for the window; bring it forward on the frame
         // that follows the click (macOS activates the app, but a minimized
         // window would otherwise stay behind).
@@ -336,7 +340,6 @@ impl Render for OrbitApp {
         // loader (parked runs come in via `running_paths` above).
         let agent_running = self.busy || self.transcript.is_streaming();
         // Every live process (running or warm-idle) — guards delete.
-        let live_paths: Rc<HashSet<PathBuf>> = Rc::new(self.lives.keys().cloned().collect());
         // Per-workspace sidebar marks (icon + tint), read by every header row.
         let marks: Rc<HashMap<PathBuf, WorkspaceMark>> = Rc::new(self.workspace_marks.clone());
         // Branch per project, for the rows' metadata line. Fetched off-thread
@@ -381,7 +384,6 @@ impl Render for OrbitApp {
                     show_first_message,
                     show_updated,
                     show_shortcuts,
-                    &live_paths,
                     &marks,
                     &workspace_icons,
                     &logos,
@@ -706,6 +708,8 @@ impl Render for OrbitApp {
             self.remote_key_editor_focus
                 .closed(in_settings && self.remote_key_editor.is_some()),
             self.server_clone_focus.closed(self.server_clone.is_some()),
+            self.project_rename_focus
+                .closed(self.project_rename.is_some()),
             self.remote_password_focus
                 .closed(self.remote_password_prompt.is_some()),
             self.project_trust_modal_focus
@@ -860,8 +864,7 @@ impl Render for OrbitApp {
                                         self.sidebar_sort_menu,
                                         cx.entity(),
                                         theme,
-                                    ))
-                                    .child(self.sidebar_new_task_button(theme, cx)),
+                                    )),
                             )
                             // session list (scrolls), grouped by workspace — or
                             // one flat list when grouping is off. The section
@@ -878,10 +881,13 @@ impl Render for OrbitApp {
                                     // label, then a hairline to the edge, so
                                     // the section reads as a heading without a
                                     // box. The left inset matches a project
-                                    // header's chevron column.
+                                    // header's chevron column; the right
+                                    // inset leaves the New project button
+                                    // over the project rows' trailing column.
                                     .child(
                                         div()
-                                            .px(DynamicSpacing::Base16.px(&theme))
+                                            .pl(DynamicSpacing::Base16.px(&theme))
+                                            .pr(DynamicSpacing::Base08.px(&theme))
                                             .pt(DynamicSpacing::Base04.px(&theme))
                                             .flex()
                                             .items_center()
@@ -890,7 +896,7 @@ impl Render for OrbitApp {
                                                 div()
                                                     .min_w_0()
                                                     .truncate()
-                                                    .text_size(TextSize::XSmall.px(&theme))
+                                                    .text_size(TextSize::Small.px(&theme))
                                                     .font_weight(FontWeight::SEMIBOLD)
                                                     .text_color(theme.text_muted)
                                                     .child(match self.sidebar_group_by {
@@ -917,7 +923,7 @@ impl Render for OrbitApp {
                                                             "sidebar-session-count".into()
                                                         })
                                                         .flex_none()
-                                                        .text_size(TextSize::XSmall.px(&theme))
+                                                        .text_size(TextSize::Small.px(&theme))
                                                         .text_color(theme.text_muted)
                                                         .child(listed_sessions.to_string()),
                                                 )
@@ -928,7 +934,8 @@ impl Render for OrbitApp {
                                                     .min_w(DynamicSpacing::Base16.px(&theme))
                                                     .h(BORDER_WIDTH)
                                                     .bg(theme.hairline_subtle()),
-                                            ),
+                                            )
+                                            .child(self.sidebar_new_project_button(theme, cx)),
                                     )
                                     .child(if side_rows.is_empty() {
                                         if self.sidebar_query.is_empty() {
@@ -987,7 +994,6 @@ impl Render for OrbitApp {
                                                                     show_first_message,
                                                                     show_updated,
                                                                     show_shortcuts,
-                                                                    &live_paths,
                                                                     &marks,
                                                                     &workspace_icons,
                                                                     &logos,
@@ -1807,6 +1813,8 @@ impl Render for OrbitApp {
             // ── Add to a server — the clone dialog; under the password prompt
             // its connection check may raise.
             .children(self.server_clone_layer(theme, cx.entity(), cx))
+            // ── project rename — the sidebar header menu's Rename….
+            .children(self.project_rename_layer(theme, cx.entity(), cx))
             .children(self.remote_password_layer(theme, cx.entity(), cx))
             // ── workspace trust — Orbit's own decision before pi loads
             // project-local code, settings, skills or MCP servers.
@@ -4174,27 +4182,26 @@ impl OrbitApp {
         )
     }
 
-    /// The sidebar's New Task action, with its shortcut in the tooltip.
-    pub(super) fn sidebar_new_task_button(
+    /// The Projects section's **New project** action: add a folder to the
+    /// sidebar as a project (#166). It replaced the search row's New Task
+    /// button, which only duplicated each project's own `+` and ⌘N.
+    pub(super) fn sidebar_new_project_button(
         &self,
         theme: Theme,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
-        IconButton::new("sidebar-new-session", "icons/task-edit-01.svg")
-            .size(ButtonSize::Large)
-            .ink(theme.text_primary)
+        IconButton::new("sidebar-new-project", "icons/folder-plus.svg")
+            .size(ButtonSize::Compact)
             .tip(crate::commands::tooltip(
-                crate::commands::CommandId::NewSession,
+                crate::commands::CommandId::NewProject,
                 false,
             ))
             .on_mouse_up(
                 &theme,
-                cx.listener(|this, _: &MouseUpEvent, w, cx| {
-                    this.on_new_session(&crate::NewSession, w, cx)
+                cx.listener(|this, _: &MouseUpEvent, window, cx| {
+                    this.new_project(window, cx)
                 }),
             )
-            // The sidebar's primary action rests on a filled face.
-            .bg(theme.overlay)
     }
 
     /// The sidebar footer's utility icons: Git, Usage and Settings. Icon-only —
@@ -4387,6 +4394,9 @@ impl OrbitApp {
         }
         if let Some(dialog) = &self.server_clone {
             return Some(vec![dialog.folder.clone()]);
+        }
+        if let Some(rename) = &self.project_rename {
+            return Some(vec![rename.input.clone()]);
         }
         // The rest are painted by the Settings page, so they own the keyboard
         // only while it is open.

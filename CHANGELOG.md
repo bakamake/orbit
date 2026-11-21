@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Sidebar projects, easier to read and manage** (#166). The Projects label,
+  project names and project icons are larger. A project's ⋯ menu has
+  **Rename…**: the new name shows in the sidebar only, and the folder on disk
+  is never renamed (leave the field empty to go back to the folder name). The
+  search row's New Task button is gone, since each project's `+` and ⌘N
+  already start a task; the Projects header now has a **New project** button
+  instead.
+- **Delete the open task** (#166). **Delete session…** now works on the task
+  you have open: Orbit opens a new task, stops the old task's pi process, then
+  deletes the file. It stays disabled only while a run is in progress. The
+  command palette's Delete Session uses the same safe path.
+- **Branch from a message…** (#166) in a task's menu opens the message picker
+  for that task, so you can start a new task from any earlier turn.
+- **First launch no longer uses Orbit's own folder as the project** (#166). A
+  launch from the Dock, Start menu or a shortcut with no remembered folder now
+  starts in your home folder instead of the install directory (Windows) or `/`.
+
 - **Frosted code blocks.** Code blocks and Mermaid diagrams in answers now
   use the same frosted glass as tool cards over a wallpaper (and in dark
   themes), with the code well's contrast-floored tint so code stays readable.

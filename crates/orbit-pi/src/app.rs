@@ -81,7 +81,7 @@ use crate::usage::page::UsagePage;
 use crate::watch;
 use crate::widgets::{ExtensionWidget, WidgetPlacement};
 use crate::workflow::WorkflowMode;
-use crate::workspace_mark::WorkspaceMark;
+use crate::workspace_mark::{self, WorkspaceMark};
 use crate::workspace_picker::{WorkspaceEntry, WorkspacePicker};
 
 const SIDEBAR_DEFAULT_W: f32 = 272.;
@@ -1103,6 +1103,10 @@ pub struct OrbitApp {
     /// A row-menu rename waiting for the target session's state to load.
     pending_session_rename: Option<PathBuf>,
     session_rename_ready: bool,
+    /// A row-menu **Branch from…** waiting for the target session to load,
+    /// and the flag that opens the message picker once it has (#166).
+    pending_session_branch: Option<PathBuf>,
+    session_branch_ready: bool,
     /// A popover-triggered title generation is in flight; the next
     /// `session_info_changed` seeds the rename field from its result.
     title_generating: bool,
@@ -1492,6 +1496,10 @@ pub struct OrbitApp {
     remote_resuming: bool,
     /// Hands focus back to whatever opened `server_clone` once it closes.
     server_clone_focus: ModalFocus,
+    /// The project Rename dialog, while open (`project_rename_ui.rs`).
+    project_rename: Option<project_rename_ui::ProjectRename>,
+    /// Hands focus back to whatever opened `project_rename` once it closes.
+    project_rename_focus: ModalFocus,
     remote_host_checks: std::collections::HashMap<String, remote_hosts_ui::HostCheck>,
     /// SSH passwords entered this run, keyed by ssh account
     /// (`RemoteHost::account_key`). Memory only: never written, dropped the
@@ -2051,9 +2059,14 @@ impl OrbitApp {
         // default; a deleted folder falls back to cwd. Sessions live in the
         // real ~/.pi/agent/sessions so they are shared with the CLI.
         let workspace = load_last_workspace()
-            .or_else(|| std::env::current_dir().ok())
-            .map(|path| sessions::canonical_workspace_path(&path))
-            .unwrap_or_else(|| PathBuf::from("."));
+            .unwrap_or_else(|| {
+                first_launch_workspace(
+                    std::env::current_dir().ok(),
+                    std::env::current_exe().ok(),
+                    crate::platform::home_dir_opt(),
+                )
+            });
+        let workspace = sessions::canonical_workspace_path(&workspace);
         let workspace_logo = crate::workspace_logo::load(&workspace);
         let extensions = BundledExtensions::install();
         // Teach the installed pi's RPC mode the capabilities Orbit uses
@@ -2744,6 +2757,8 @@ impl OrbitApp {
             session_details_open: false,
             session_name_editing: false,
             pending_session_rename: None,
+            pending_session_branch: None,
+            session_branch_ready: false,
             session_rename_ready: false,
             title_generating: false,
             rename_saved_at: None,
@@ -2886,6 +2901,8 @@ impl OrbitApp {
             remote_sessions_collapsed: HashSet::new(),
             remote_resuming: false,
             server_clone_focus: ModalFocus::default(),
+            project_rename: None,
+            project_rename_focus: ModalFocus::default(),
             remote_host_checks: std::collections::HashMap::new(),
             remote_host_secrets: std::collections::HashMap::new(),
             remote_password_prompt: None,
@@ -3930,7 +3947,7 @@ fn parse_workspace_store(value: &Value) -> WorkspaceStore {
                 WorkspaceMark::default(),
             ),
             // Current format: `{ "path": …, "added_at": <unix secs>,
-            // "icon": <stem>, "tint": <key> }`.
+            // "icon": <stem>, "tint": <key>, "name": <display name> }`.
             Value::Object(map) => {
                 let Some(raw) = map.get("path").and_then(Value::as_str) else {
                     continue;
@@ -3942,6 +3959,12 @@ fn parse_workspace_store(value: &Value) -> WorkspaceStore {
                 let mark = WorkspaceMark {
                     icon: map.get("icon").and_then(Value::as_str).map(str::to_string),
                     tint: map.get("tint").and_then(Value::as_str).map(str::to_string),
+                    name: map
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string),
                 };
                 (
                     sessions::canonical_workspace_path(Path::new(raw)),
@@ -4005,6 +4028,9 @@ fn workspace_store_json(store: &WorkspaceStore) -> Value {
             if let Some(tint) = mark.tint {
                 entry.insert("tint".into(), serde_json::json!(tint));
             }
+            if let Some(name) = mark.name {
+                entry.insert("name".into(), serde_json::json!(name));
+            }
             Value::Object(entry)
         })
         .collect();
@@ -4033,6 +4059,28 @@ fn load_last_workspace() -> Option<PathBuf> {
     let value = serde_json::from_str::<Value>(&raw).ok()?;
     let path = sessions::canonical_workspace_path(Path::new(value.get("path")?.as_str()?));
     path.is_dir().then_some(path)
+}
+
+/// The folder a launch with no remembered workspace starts in (#166).
+///
+/// The process cwd is only a meaningful project when someone chose it — a
+/// terminal launch. An app launched from the Dock, Start menu or a shortcut
+/// inherits `/` or the install folder, and offering Orbit's own binary
+/// directory as a project is never right. Those fall back to the home folder.
+pub(crate) fn first_launch_workspace(
+    cwd: Option<PathBuf>,
+    exe: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> PathBuf {
+    let install_dir = exe.as_deref().and_then(Path::parent);
+    let meaningful = cwd.filter(|cwd| {
+        let is_root = cwd.parent().is_none();
+        let in_install_dir = install_dir.is_some_and(|dir| cwd.starts_with(dir));
+        !is_root && !in_install_dir
+    });
+    meaningful
+        .or(home)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn persist_last_workspace(path: &Path) {
@@ -4647,6 +4695,7 @@ mod permissions_ui;
 mod pi_update_ui;
 mod pickers;
 mod plugin_update_ui;
+mod project_rename_ui;
 mod project_trust_ui;
 mod provider_accounts;
 mod remote_hosts_ui;
@@ -4685,6 +4734,8 @@ mod backdrop_layout_tests;
 mod cancel_tests;
 #[cfg(test)]
 mod composer_chrome_tests;
+#[cfg(test)]
+mod first_launch_tests;
 #[cfg(test)]
 mod composer_draft_tests;
 #[cfg(test)]

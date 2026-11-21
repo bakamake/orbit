@@ -183,7 +183,7 @@ dialog, and the custom-UI card) via `elevation_3` and the `modal` metrics; the l
 `popover_shadow` is gone. Sidebar session / workspace rows use Zed's list-item radius and the
 `TextSize` / `DynamicSpacing` scales, as do the transcript's message rows, user bubbles, tool /
 question card shells, error strips, the usage footer, and the settings section / group / row
-chrome and keycap chips. The sidebar's New Task / Search / Usage controls share one
+chrome and keycap chips. The sidebar's Search / Usage controls share one
 `button_frame(ButtonSize::Large)`. The ad-hoc `Theme::space` (density-only) helper is gone: every spacing
 site now resolves through `DynamicSpacing`, so chrome tracks the UI font size as well as
 density. UI type is on the `TextSize` scale across every surface (471 of 517 `.text_size` sites);
@@ -736,7 +736,20 @@ off-thread, with the row removed only on success); `project_delete_refusal`
 refuses a filesystem root, the home folder, a folder that contains another
 project, and a folder a live task still works in, and its cases are covered in
 `sidebar_remove_tests`. **New project…** (command palette) adds a folder to the sidebar with no pi session
-(`OrbitApp::new_project` → `add_workspace`). Settings → Providers & models renders
+(`OrbitApp::new_project` → `add_workspace`); since #166 it is also a
+button on the sidebar's Projects header, which replaced the search row's New
+Task button. #166 also adds a project display name (`WorkspaceMark::name`,
+stored as `name` in `workspaces.json` beside icon and tint, edited from the
+header menu's **Rename…** in `app/project_rename_ui.rs`): the group's identity
+stays the folder label, so a rename moves no collapsed state, order or pin.
+**Delete session…** is enabled for any session without a run in flight
+(`session_delete_blocked`); confirming on the open session first hands the
+window to a new task (which parks it), then drops the parked process before
+removing the file. The session menu's **Branch from a message…** opens the
+rewind picker, switching to the session first and waiting for its `get_state`
+like Rename. A launch with no remembered folder uses `first_launch_workspace`:
+the process cwd unless it is a filesystem root or inside the executable's
+directory, otherwise the home folder. Settings → Providers & models renders
 connected and unconnected providers as rows on two grouped boards (the shared
 `settings_group` surface, not a card grid). A row's head is one line — brand mark, name,
 status, one truncated facts line, and on the right only the model count, the first
