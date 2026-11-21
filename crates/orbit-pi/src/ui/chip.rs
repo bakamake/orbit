@@ -16,7 +16,7 @@ use gpui::{
 
 use crate::motion::Hover;
 use crate::theme::{
-    tokens::{ButtonSize, DynamicSpacing, IconSize, Radius, RaisedExt, TextSize},
+    tokens::{ButtonSize, DynamicSpacing, IconSize, RaisedExt, TextSize},
     Theme,
 };
 use crate::ui::button::button_frame;
@@ -53,7 +53,26 @@ pub(crate) fn experimental_badge(theme: &Theme) -> AnyElement {
         .into_any_element()
 }
 
-/// A one-line label at Compact height, `Radius::Small`, XSmall medium ink.
+/// The quiet "Experimental" tag for a dense list row (a remote host in the
+/// Work in picker): muted ink on the faint overlay face, so a list of places does not
+/// read as a list of warnings. Settings, where the word explains a feature,
+/// keeps the warning-toned [`experimental_badge`].
+pub(crate) fn experimental_tag(theme: &Theme) -> AnyElement {
+    gpui::div()
+        .flex_none()
+        .debug_selector(|| "experimental-tag".to_string())
+        .child(
+            Badge::new(
+                tr!("common.experimental"),
+                theme.text_muted,
+                BadgeFill::Solid(theme.overlay),
+            )
+            .render(theme),
+        )
+        .into_any_element()
+}
+
+/// A one-line capsule at Compact height with XSmall medium ink.
 pub(crate) struct Badge {
     label: SharedString,
     ink: Hsla,
@@ -93,7 +112,7 @@ impl Badge {
             .flex_none()
             .h(ButtonSize::Compact.height(theme))
             .px(DynamicSpacing::Base06.px(theme))
-            .rounded(Radius::Small.px(theme))
+            .rounded_full()
             .flex()
             .items_center()
             .whitespace_nowrap()
@@ -618,9 +637,13 @@ pub(crate) struct FileChip {
     visual: AnyElement,
     name: SharedString,
     name_tip: Option<SharedString>,
+    /// Replaces the plain name: a caller that needs the path as selectable
+    /// text (a sent message's file) passes its own element here.
+    name_element: Option<AnyElement>,
     meta: Option<SharedString>,
     selector: Option<SharedString>,
     max_name_w: Pixels,
+    face: Option<Hsla>,
     remove_tip: SharedString,
     remove: Option<RemoveHandler>,
     open: Option<OpenHandler>,
@@ -637,9 +660,11 @@ impl FileChip {
             visual: visual.into_any_element(),
             name: name.into(),
             name_tip: None,
+            name_element: None,
             meta: None,
             selector: None,
             max_name_w: gpui::px(180.),
+            face: None,
             remove_tip: SharedString::default(),
             remove: None,
             open: None,
@@ -649,6 +674,21 @@ impl FileChip {
     /// The full name (or path) on hover over the truncated label.
     pub(crate) fn name_tip(mut self, tip: impl Into<SharedString>) -> Self {
         self.name_tip = Some(tip.into());
+        self
+    }
+
+    /// Paint `element` in the name slot instead of the plain name. It is
+    /// clipped at the name width, not ellipsized, so selection offsets keep
+    /// matching the full text it carries.
+    pub(crate) fn name_element(mut self, element: impl IntoElement) -> Self {
+        self.name_element = Some(element.into_any_element());
+        self
+    }
+
+    /// The chip's face, when it sits somewhere `surface_elevated` alone would
+    /// not read (a glass bubble passes its `card_fill`).
+    pub(crate) fn face(mut self, fill: Hsla) -> Self {
+        self.face = Some(fill);
         self
     }
 
@@ -694,11 +734,16 @@ impl FileChip {
             "remove-{}",
             self.selector.clone().unwrap_or_else(|| format!("{}", self.id).into())
         );
+        // A chip that neither opens nor removes is a read-out: it answers no
+        // hover, so it never promises an action it does not have.
+        let interactive = self.remove.is_some() || self.open.is_some();
         let mut chip = button_frame(div().id(self.id), theme, ButtonSize::Medium)
             .border_1()
             .border_color(theme.hairline())
-            .raised(theme.surface_elevated, theme)
-            .hover_border(theme);
+            .raised(self.face.unwrap_or(theme.surface_elevated), theme);
+        if interactive {
+            chip = chip.hover_border(theme);
+        }
         if let Some(selector) = self.selector.clone() {
             chip = chip.debug_selector(move || selector.to_string());
         }
@@ -706,14 +751,24 @@ impl FileChip {
             .id(SharedString::from(format!("{remove_id}-name")))
             .min_w_0()
             .max_w(self.max_name_w)
-            .truncate()
             .text_color(theme.text_secondary);
+        if let Some(selector) = self.selector.clone() {
+            name = name.debug_selector(move || format!("{selector}-name"));
+        }
+        name = match self.name_element {
+            Some(_) => name.overflow_hidden().whitespace_nowrap(),
+            None => name.truncate(),
+        };
         if let Some(tip) = self.name_tip {
             name = name.tip(tip);
         }
+        let label = match self.name_element {
+            Some(element) => element,
+            None => self.name.into_any_element(),
+        };
         let chip = chip
             .child(self.visual)
-            .child(name.child(self.name))
+            .child(name.child(label))
             .children(self.meta.map(|meta| {
                 div()
                     .flex_none()

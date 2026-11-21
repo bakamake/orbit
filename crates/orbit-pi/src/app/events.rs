@@ -59,10 +59,16 @@ impl OrbitApp {
         self.tick_wallpaper_library(cx);
         self.tick_repo_star(cx);
         self.tick_background(cx);
+        // A workspace trusted mid-run reloads project resources only once
+        // the current run has settled.
+        self.tick_project_trust(cx);
         // MCP: external-change detection, the debounced `pi mcp list` probe,
         // and a deferred restart that applies new server configuration while
         // preserving the session.
         self.tick_mcp(cx);
+        // The open subagent tab's live transcript: read what its child's log
+        // gained since the last tick, off the UI thread.
+        self.tick_child_logs(cx);
         // Persist a settled panel layout (a drag writes once it stops).
         crate::layout::flush_if_settled();
         // Debug builds only: time the frames a run actually produces, so a

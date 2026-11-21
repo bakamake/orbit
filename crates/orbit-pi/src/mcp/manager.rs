@@ -486,7 +486,10 @@ impl McpManager {
 
 /// Run `pi mcp list --json` in `workspace` with Orbit's secrets in the
 /// environment. Blocking: call it on `cx.background_executor()`.
-pub(crate) fn probe(workspace: &Path, env: &[(String, String)]) -> McpProbe {
+pub(crate) fn probe(
+    workspace: &Path,
+    env: &[(String, String)],
+) -> McpProbe {
     probe_with_agent_dir(workspace, env, None)
 }
 
@@ -552,6 +555,11 @@ pub(crate) fn probe_with_agent_dir(
 /// `PATH` (a bundled `.app` lacks `node`), quiet non-interactive env, and
 /// Orbit's secret values so `${NAME}` references resolve exactly as they do
 /// in a session.
+///
+/// No `--approve` / `--no-approve`: `pi mcp` rejects both ("Unknown option"),
+/// and placed before `mcp` they turn the call into a prompt run. Pi applies its
+/// own project-trust rule to `.pi/mcp.json`; Orbit's trust decision only picks
+/// which secrets the caller passes in `env`.
 fn pi_mcp_command(args: &[&str], workspace: &Path, env: &[(String, String)]) -> Command {
     let bin = orbit_rpc::pi_binary();
     let mut command = Command::new(&bin);
@@ -1474,6 +1482,18 @@ process.stdin.on('data', (chunk) => {
   }
 });
 "#;
+
+    /// `pi mcp` accepts no project-trust flag: pi 1.6 answers
+    /// `Unknown option --approve` and every probe/login/logout fails.
+    #[test]
+    fn pi_mcp_command_passes_no_project_trust_flag() {
+        let command = pi_mcp_command(&["mcp", "list", "--json"], Path::new("."), &[]);
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["mcp", "list", "--json"]);
+    }
 
     /// Live end-to-end: a config Orbit wrote is read back and connected by
     /// the real installed pi (`pi mcp list --json`), and the probe result

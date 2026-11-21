@@ -177,12 +177,19 @@ impl OrbitApp {
             .workspace()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| self.workspace_dir());
-        let env = self.mcp.secret_env();
+        let approve_project = self.local_project_trust_for(&workspace).is_trusted();
+        let env = if approve_project {
+            self.mcp.secret_env()
+        } else {
+            Vec::new()
+        };
         self.mcp.begin_probe();
         cx.spawn(async move |this, cx| {
             let probe = cx
                 .background_executor()
-                .spawn(async move { crate::mcp::manager::probe(&workspace, &env) })
+                .spawn(async move {
+                    crate::mcp::manager::probe(&workspace, &env)
+                })
                 .await;
             let _ = this.update(cx, |app, cx| app.on_mcp_probe(probe, cx));
         })
@@ -849,7 +856,12 @@ impl OrbitApp {
             return;
         }
         let workspace = self.workspace_dir();
-        let env = self.mcp.secret_env();
+        let approve_project = self.local_project_trust_for(&workspace).is_trusted();
+        let env = if approve_project {
+            self.mcp.secret_env()
+        } else {
+            Vec::new()
+        };
         let cancel = Arc::new(AtomicBool::new(false));
         self.mcp_auth = Some(McpAuthJob {
             server: name.clone(),
@@ -912,12 +924,19 @@ impl OrbitApp {
             return;
         }
         let workspace = self.workspace_dir();
-        let env = self.mcp.secret_env();
+        let approve_project = self.local_project_trust_for(&workspace).is_trusted();
+        let env = if approve_project {
+            self.mcp.secret_env()
+        } else {
+            Vec::new()
+        };
         let task_name = name.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { crate::mcp::manager::logout(&workspace, &env, &task_name) })
+                .spawn(async move {
+                    crate::mcp::manager::logout(&workspace, &env, &task_name)
+                })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 match result {

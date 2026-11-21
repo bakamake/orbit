@@ -98,6 +98,7 @@ mod session_order;
 mod perf;
 mod permissions;
 mod plugins;
+mod project_trust;
 mod provider_accounts;
 mod providers;
 mod quota;
@@ -119,6 +120,7 @@ mod shimmer;
 mod sidepane;
 mod skills;
 mod subagent;
+mod subagent_log;
 mod subagent_file;
 mod subagents;
 mod terminal;
@@ -253,6 +255,9 @@ actions!(switch_keys, [SwitchToggle]);
 // Enter/Space open that child's log, Escape closes it (and otherwise falls
 // through to the global abort).
 actions!(subagent_keys, [SubagentRowToggle, SubagentRowClose]);
+// A transcript activity disclosure (a group's summary line, a tool row, a
+// thought row), while its focus handle owns the keyboard: Enter/Space fold it.
+actions!(activity_keys, [ActivityToggle]);
 actions!(
     git_list_keys,
     [
@@ -312,6 +317,7 @@ actions!(
         WorkInMenuFirst,
         WorkInMenuLast,
         WorkInMenuConfirm,
+        WorkInMenuOpenSubmenu,
         WorkInMenuClose
     ]
 );
@@ -559,6 +565,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // Work-in picker keys — same shape again.
         KeyBinding::new("escape", WorkInMenuClose, Some("WorkInMenu")),
         KeyBinding::new("enter", WorkInMenuConfirm, Some("WorkInMenu")),
+        KeyBinding::new("right", WorkInMenuOpenSubmenu, Some("WorkInMenu")),
         KeyBinding::new("up", WorkInMenuPrev, Some("WorkInMenu")),
         KeyBinding::new("down", WorkInMenuNext, Some("WorkInMenu")),
         KeyBinding::new("home", WorkInMenuFirst, Some("WorkInMenu")),
@@ -696,6 +703,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", SubagentRowToggle, Some("SubagentRow")),
         KeyBinding::new("space", SubagentRowToggle, Some("SubagentRow")),
         KeyBinding::new("escape", SubagentRowClose, Some("SubagentRow")),
+        // A focused activity disclosure folds or unfolds, like a native
+        // disclosure button.
+        KeyBinding::new("enter", ActivityToggle, Some("ActivityToggle")),
+        KeyBinding::new("space", ActivityToggle, Some("ActivityToggle")),
     ]);
 }
 

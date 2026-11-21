@@ -119,9 +119,9 @@ injects them into an installed pi by wrapping `ModelRuntime.login`/`logout`/`lis
 **Choice:** a session is scoped **Plan**, **Build**, or **Ask**. Orbit persists the
 mode per pi session id in `~/.orbit-pi/workflow.json` (a map), and the bundled
 `contrib/orbit-workflow-extension/` reads it fresh on every hook. Plan and Ask drop
-the write tools with `pi.setActiveTools`, gate `bash` to a read-only allowlist on
-`tool_call`, and inject hidden guidance on `before_agent_start`; Build is the neutral
-default. The mode is also written into the session as an `orbit:workflow` entry so
+the write tools with `pi.setActiveTools`, default-deny MCP, custom, and orchestration
+tools, gate `bash` to conservative per-utility read-only policies on `tool_call`,
+and inject hidden guidance on `before_agent_start`; Build is the neutral default. The mode is also written into the session as an `orbit:workflow` entry so
 it survives resume and branch.
 
 **Rationale:** pi exposes no RPC command for active tools or the system prompt, so
@@ -297,6 +297,10 @@ A missing worktree surfaces a notice rather than silently re-pointing a session 
 main repository.
 
 ### D15 — One design system; palettes are colorways, not forks
+
+The shared visual language uses softly rounded controls and cards, with frosted
+floating surfaces where supported and soft shadows for separation. Palette roles,
+contrast floors and opaque accessibility fallbacks remain common to every colorway.
 **Choice:** there is one design system. Classic (the Orbit family, Flexoki, Onyx) and
 Operational used to be separate `DesignSystem` values behind their own Settings switch; once
 both shared the same radius, typography and elevation grammar the split only hid palettes,
@@ -362,7 +366,9 @@ racing for one name is worse than one honest absence.
 details degrade to the generic card). The guard classifies `subagent` as `delegate` and allows it in
 every mode: the child cannot exceed the mode and the extension refuses impossible runs, so a prompt
 would approve nothing. Depth is 1 and applies to Orbit's own tool; a third-party delegation extension
-loaded in the child is not constrained by it.
+loaded in the child is not constrained by it. D23 scopes approval and exact MCP
+secret inheritance to the same canonical workspace; cross-workspace children
+use `--no-approve` and drop those secrets.
 
 ### D19 — Permissions: rules over the guard, per command and per agent
 
@@ -405,7 +411,8 @@ and why `deny` re-checks every segment.
 the access guard under `~/.orbit-pi/remote-guard/`, pins the host's
 `~/.orbit-pi/access.json` to `supervised`, refuses to continue without the
 guard (exit 78) or without `pi` on the login PATH (exit 127), and `exec`s
-`pi --mode rpc --approve --extension <guard>`. Hosts live in
+`pi --mode rpc (--approve only when D23 trusts the remote workspace, otherwise
+--no-approve) --extension <guard>`. Hosts live in
 `~/.orbit-pi/remote-hosts.json`, managed from Settings → Remote hosts (add/edit
 form with `~/.ssh/config` alias suggestions and a read-only Test connection
 probe) and written surgically — only the keys Orbit owns change. Only the agent is remote: every surface that
@@ -502,6 +509,55 @@ composer's morphing send button, the updater pill) carries a `// Bespoke:`
 comment saying why. The migration's declared visual changes are recorded in
 `docs/plans/ui-component-layer.md` §6.2–§6.13.
 
+### D23 — Project trust is explicit and scoped to the canonical workspace
+
+**Choice:** Orbit no longer treats opening a folder as consent to execute its code. Every
+pi process starts with `--no-approve` unless `~/.orbit-pi/project-trust.json` contains an
+explicit trusted decision for that canonical local workspace or remote account+directory.
+Unknown and denied workspaces keep Orbit's explicitly loaded extensions but do not load
+project settings, extensions, skills, or MCP servers, and receive no MCP secret environment.
+A native dialog persists Trust / Continue untrusted; the palette can revisit a denial. Trust
+changes restart only after the active run settles. Local MCP commands always use the local
+decision, never the remote session's.
+
+**Consequence:** delegated children inherit approval only when their canonical cwd is the
+same trusted workspace. Cross-workspace children use `--no-approve`, drop the exact exported
+secret-name set, and re-apply Orbit-owned guardrail variables after secret removal. Plan/Ask
+use conservative per-utility shell policies and default-deny MCP, custom, and orchestration
+tools; invalid workflow evidence falls through to the session branch instead of becoming
+Build. Remote Markdown images are passive browser links rather than automatic requests;
+the remaining avatar client uses HTTPS, timeouts, bounded redirects, and an 8 MiB body cap.
+Updater verification consumes the same open file it verified, scratch directories are
+owner-only, feed/error writes are bounded and non-following, clone URLs lose userinfo and
+query credentials, and quota adapters require exact official HTTPS origins.
+
+**Rationale:** project trust, tool approval, and workflow scope are separate controls. A
+repository author, model response, remote document, or another local OS user must not cross
+one of those boundaries without an explicit user decision or verified byte stream.
+
+### D24 — A delegated child's live transcript is its own event stream
+
+**Choice:** the subagents extension tees every JSONL line a child `pi --mode json` prints,
+verbatim, into `~/.orbit-pi/subagent-logs/<run>-<child>.jsonl` (0600, `log.js`) and names the
+file in the child's `subagent/1` details (`log`). A child's side-pane tab tails that file off the
+UI thread on the heartbeat (`subagent_log.rs`: byte offset + partial line, ≤ 4 MiB per read) and
+feeds each line through `Event::parse_line` into a second `Transcript`, painted by
+`Transcript::render`. Children still run `--no-session`.
+
+**Consequence:** a child streams in the pane exactly as the main session streams in the chat —
+thoughts, tool calls with their output, the answer — with the same rows (activity groups, the
+file-read listing, Markdown), and a finished child replays from its log. The `details` summary
+stays bounded and is still what the card and the parent model see. The path is honoured only
+when it is a plain `.jsonl` directly inside Orbit's own log directory, because a session file
+can carry `details` from anywhere. Without a readable local log (an older extension, a remote
+host, an unwritable home) the tab shows the summary panel as before. Logs older than a week are
+removed when a run starts.
+
+**Rationale:** pi's own event stream is the truth of what a child did (hard rule 5); widening the
+`details` payload toward a transcript would resend the whole history on every 400 ms update,
+while the event log only grows at its end and needs no new parser — the app already turns those
+exact events into a transcript.
+
 ## The feature parity contract
 
 Everything below must behave identically in the GPUI app (against the pi CLI) as it does in the
@@ -525,6 +581,37 @@ legacy app today:
     as keyboard/mouse surfaces (⌘P palette, shortcuts), not only through menus.
 
 ### Implementation status (living)
+
+The shared tooltip fades in on the interaction motion role; persistent update
+notice actions and their close control use the retargetable hover treatment.
+Reduce Motion presents their final appearance immediately.
+
+Project trust (D23) now gates every local, remote, MCP, plugin, and delegated pi
+spawn. Unknown workspaces run restricted with no project resources or MCP secrets;
+the native trust dialog persists an explicit choice and the palette can reopen it.
+Plan/Ask close direct shell, MCP, custom-tool, and resumed-delegation bypasses.
+Remote Markdown images no longer fetch automatically, avatar responses are bounded,
+quota origins are exact, clone credentials are stripped before remote use, and the
+signed updater verifies and extracts one immutable open artifact from a private
+scratch root. Regression coverage includes cross-workspace trust, invalid workflow
+state, mutating shell forms, hostile scratch roots, pathname replacement after
+verification, credential-bearing URLs, oversized bodies, and lookalike quota hosts.
+
+The idle composer send control transitions between its disabled square and its
+labelled action as a draft becomes sendable or is cleared; its transition can
+reverse and Reduce Motion presents the final shape immediately.
+
+Queue, run-status, approval and inline-question cards use the same floating
+glass material as the composer, retaining their distinct edges and interactions.
+
+Shared Settings and Usage boards use the page-scoped floating material: dark
+boards can frost the workbench without wallpaper, while full-window wallpaper
+and accessibility preferences continue to control the fallback.
+
+The shared workbench geometry uses 6px compact controls and rows, 9px standard
+controls, 12px cards and 16px dialogs before the rounding preference. Floating surfaces use
+soft shadows alongside their existing contrast-controlled frost and opaque
+fallbacks; the semantic palette roles remain unchanged.
 
 Settings → Appearance → Background offers **Desktop** (`WallpaperMode::Desktop`):
 the window's background appearance becomes `Blurred`, so the OS compositor
@@ -614,8 +701,8 @@ per-host cards with an on/off switch and a ⋯ menu, a Machine selector on Provi
 installer, plus checksum-verified Node.js 22 when missing; no sudo), explained
 failures (cloud root guard with **Use opc**, signals, pi missing), lookup through
 the user's own login shell and pi's install folders,
-host rows in the new-task folder picker (the host config lives in Settings →
-Remote hosts, reachable from the "Work in" menu), the host named on the folder chip and the
+host rows in the "Work in" picker (the new-task folder picker lists folders
+only; the host config lives in Settings → Remote hosts), the host named on the folder chip and the
 status bar, the unavailable state on Files / Worktrees, a read-only Git page that
 shows the host's own repository facts for the session's folder (root, branch,
 upstream and ahead/behind, changed files, last commit, `origin`; read over ssh
@@ -648,8 +735,7 @@ files** (a confirmation that names the folder, then `platform::trash_path`
 off-thread, with the row removed only on success); `project_delete_refusal`
 refuses a filesystem root, the home folder, a folder that contains another
 project, and a folder a live task still works in, and its cases are covered in
-`sidebar_remove_tests`. **New project…** (command palette, and a row in the
-new-task folder picker) adds a folder to the sidebar with no pi session
+`sidebar_remove_tests`. **New project…** (command palette) adds a folder to the sidebar with no pi session
 (`OrbitApp::new_project` → `add_workspace`). Settings → Providers & models renders
 connected and unconnected providers as rows on two grouped boards (the shared
 `settings_group` surface, not a card grid). A row's head is one line — brand mark, name,
@@ -687,7 +773,12 @@ tier (which writes the `tools:` line and derives the child's ceiling), the workf
 the thinking level, the description and the prompt. Saves are surgical — only the five keys Orbit
 owns change, and a file edited elsewhere is never clobbered without an explicit overwrite; a user
 agent can be created, duplicated, renamed, disabled, deleted (Undo restores the exact bytes) and
-reset to builtin. The inspectable-run viewer in `docs/plans/subagents.md` is not built.
+reset to builtin. A child's side-pane tab is its live transcript (D24): the child's own pi
+events, read from the extension's event log and painted with the chat's rows, under a one-line
+status (state mark, status, elapsed); each tab wears the child's state mark, and two tabs for the
+same agent are numbered. Without a readable local log the tab keeps the summary panel. Covered by
+`node --test` (log module, the tee end to end), `subagent_log` unit tests and a GPUI test for the
+transcript, the fallback and the numbered tabs; not yet tried by hand with a real delegation.
 
 Permissions (D19) ship Settings → Permissions as one flat list, not an editor:
 a scope row (every session / main sessions only / one subagent), then one row per
@@ -720,7 +811,21 @@ secondary text keep their WCAG targets over both a black and a white backdrop
 defers to `glass_sigma` (so Glass panes still turns it off); light palettes,
 renderers without the pass, and macOS Reduce Transparency / Increase Contrast
 (read with Reduce Motion at launch and on window activation) keep the opaque
-card. Structural panes and the composer still frost only over a wallpaper.
+card. Structural panes frost only over a wallpaper; the composer also uses the
+contrast-controlled floating material on the bare dark workbench.
+
+Inspector glass: the transcript's cards (tool calls, thoughts, delegations,
+questions, summaries) and the right-dock cards (session details, Review,
+Explorer) frost under the same floating rule — so in dark palettes they are glass
+even with no wallpaper. `SurfaceExt::inspector_card` frames a transcript card
+(`Theme::inspector_fill` tint and frost — no top-edge highlight and no outline: the 1px border stays transparent, carrying only the
+blur request); `SurfaceExt::dock_card` frames a dock, whose root paints
+`Theme::dock_canvas` (clear while `Theme::dock_glass`); a tool call's
+command/output plane is `Theme::inspector_well`, held at the code background's own
+contrast floor. An expanded tool card takes `ElevationIndex::ElevatedSurface`'s
+contact shadow while frosted. Over a wallpaper with Glass panes off, and on a hero
+wallpaper for the docks, everything stays opaque. The renderer cost is one
+backdrop pass per visible card; on-device frame-time measurement is outstanding.
 Every builder of such a layer scopes its theme with `Theme::for_floating()`, so
 the rows and controls inside take the ink washes (`hover_wash`, `pressed_wash`,
 `selected_wash`) on the frost instead of the palette's opaque state steps; over a
@@ -804,7 +909,7 @@ Appearance's interface-font picker includes bundled Onest in Regular, Medium,
 SemiBold, and Bold weights; it works offline without an OS font installation.
 The default interface face and saved font preferences remain unchanged.
 
-Done: streaming transcript + virtualization; markdown + highlighting; composer with steering, follow-ups, cancel, autocomplete, attachments; extension dialogs; diff/Review + Git page (outside a repository it says so and offers **Initialize Git repository**, a plain `git init` that keeps the user's `init.defaultBranch`) + GitHub issues/PRs (where `gh` is available); sessions (list/switch/new/delete/clone/cross-workspace, plus **rewind** — pi's `fork` at an earlier user message, which branches the conversation into a new session file, keeps the old one in the sidebar, and hands the forked-from prompt back to the composer) over an Orbit-owned project list (only folders the user added; removing one never touches pi) whose groups sort by activity, added date, name, or session count — or, from the view menu, one list under local-calendar day sections (**By date**: Pinned, Today, Yesterday, This week, This month, Older; `build_date_sidebar_rows`), with a **warm process pool** so re-opening a recent session is a resume, not a Node spawn; Git worktrees as first-class workspaces (`worktree.rs` + the Worktrees page: discovery, create from a new/existing branch, open/rename/move/lock/remove/prune/repair, configurable `.wt` root, optional async setup script with `ORBIT_ROOT_PATH`/`ORBIT_WORKTREE_PATH`, sessions rooted in and restored to the worktree — D14) plus **Work in** on the status bar in a repository and on the new-task page, which lists exactly two kinds of place — this device's working folder and every enabled remote host (`remote_hosts.rs`; hosts are read once when the picker opens, and picking one runs the same guarded launch as the new-task picker) — while worktree creation (from a new or existing branch, including a remote ref checked out as a local tracking branch via `create_tracking_branch`, because `git worktree add <path> origin/feat` leaves a detached HEAD), opening a worktree folder with `git worktree repair`, and repository cloning all live on the Worktrees page (the Windows job-object clone-cancellation path is covered on the Windows CI leg; manual GUI verification remains); Explorer project panel (its own top-bar button; a two-line workspace header with New File / New Folder and a "…" menu for Refresh, Collapse All Folders and hidden files; an inset filter field; indent guides) + editable Files surface; a **session-details panel** in the right dock (the top bar's `ⓘ` chip toggles it: an inspector of Session / Environment / Model / Context / Changes / Details sections, every value read from live state — the branch watcher, `get_session_stats` context usage, the working-tree counts — and none shown before it is known; it takes the dock one at a time with Review and the Explorer, and no outside click dismisses it); integrated terminal (⌘J, with a full-width expand that opens it as a page with its own top-bar Back and title); usage, skills, plugins, models, providers, settings pages; transcript find; image lightbox; theming (dark/light/system with picture cards; thirteen palettes in one design system, chosen from Dark and Light thumbnail galleries; accent swatches; a Background board with an empty state, segmented placement and a separate Image adjustments board) + reduce-motion; localization (ten locales + System, D9); in-app signed updater + Version History (D17); notifications; open-in-editor; signed/notarizable macOS packaging + best-effort Windows/Linux bundles (D5); CI; access modes (a guard, not a sandbox), workflow modes (Plan/Build/Ask per D8), and the auto-title / quota extension bridges (D10); Zed design tokens (D11) with context menus, the tooltip, the extension dialog, the floating modal cards (provider usage / API-key / editor, update dialog, custom UI), the sidebar session / workspace rows, the transcript's message / card chrome, the settings section / group / row chrome, UI type on `TextSize` across every surface, corner radii on `Radius`, and one-shot UI motion on `Motion` roles migrated onto them.
+Done: streaming transcript + virtualization; markdown + highlighting; composer with steering, follow-ups, cancel, autocomplete, attachments; extension dialogs; diff/Review + Git page (outside a repository it says so and offers **Initialize Git repository**, a plain `git init` that keeps the user's `init.defaultBranch`) + GitHub issues/PRs (where `gh` is available); sessions (list/switch/new/delete/clone/cross-workspace, plus **rewind** — pi's `fork` at an earlier user message, which branches the conversation into a new session file, keeps the old one in the sidebar, and hands the forked-from prompt back to the composer) over an Orbit-owned project list (only folders the user added; removing one never touches pi) whose groups sort by activity, added date, name, or session count — or, from the view menu, one list under local-calendar day sections (**By date**: Pinned, Today, Yesterday, This week, This month, Older; `build_date_sidebar_rows`), with a **warm process pool** so re-opening a recent session is a resume, not a Node spawn; Git worktrees as first-class workspaces (`worktree.rs` + the Worktrees page: discovery, create from a new/existing branch, open/rename/move/lock/remove/prune/repair, configurable `.wt` root, optional async setup script with `ORBIT_ROOT_PATH`/`ORBIT_WORKTREE_PATH`, sessions rooted in and restored to the worktree — D14) plus **Work in** on the status bar in a repository and on the new-task page — in a session it lists only where the task runs (the current checkout, or its worktree); on the new-task page it lists the current checkout (and the active linked worktree, checked), **New worktree** (the Worktrees page's quick-create dialog), **Existing worktrees ›** — a flyout beside the picker with a search field over every linked worktree (branch over path; ↑/↓/Enter, Escape back; → opens it) — and every enabled remote host (`remote_hosts.rs`; hosts are read once when the picker opens, and picking one runs the same guarded launch as the new-task picker) — while the new-task page's folder selector answers only *which folder* (recent folders — the current one, then session folders newest-first, then sidebar projects, existing folders only, linked worktrees left to Work in — plus **Choose folder…**), so the two pickers never offer the same row; Work in also carries **Add this project to a server…** under the hosts, and host rows carry the **Experimental** tag; a worktree is marked with `icons/worktree.svg` (folder + branch), never the branch glyph — while the remaining worktree verbs (rename, move, lock, remove) and worktree creation (from a new or existing branch, including a remote ref checked out as a local tracking branch via `create_tracking_branch`, because `git worktree add <path> origin/feat` leaves a detached HEAD), opening a worktree folder with `git worktree repair`, and repository cloning all live on the Worktrees page (the Windows job-object clone-cancellation path is covered on the Windows CI leg; manual GUI verification remains); Explorer project panel (its own top-bar button; a two-line workspace header with New File / New Folder and a "…" menu for Refresh, Collapse All Folders and hidden files; an inset filter field; indent guides) + editable Files surface; a **session-details panel** in the right dock (the top bar's `ⓘ` chip toggles it: an inspector of Session / Environment / Model / Context / Activity / Usage / Changes / Details sections, every value read from live state — the branch watcher, `get_session_stats` context usage and session token/cost totals, the transcript's own prompt / reply / tool-call counts (`Transcript::activity_counts`), the working-tree counts — and none shown before it is known (no cache rows when nothing was cached, no Cost row without a cost table); rows take a minimum height that grows with the UI font, and the session id and file wrap in full in the code face instead of truncating; it takes the dock one at a time with Review and the Explorer, and no outside click dismisses it); integrated terminal (⌘J, with a full-width expand that opens it as a page with its own top-bar Back and title); usage, skills, plugins, models, providers, settings pages; transcript find; image lightbox; theming (dark/light/system with picture cards; thirteen palettes in one design system, chosen from Dark and Light thumbnail galleries; accent swatches; a Background board with an empty state, segmented placement and a separate Image adjustments board) + reduce-motion; localization (ten locales + System, D9); in-app signed updater + Version History (D17); notifications; open-in-editor; signed/notarizable macOS packaging + best-effort Windows/Linux bundles (D5); CI; access modes (a guard, not a sandbox), workflow modes (Plan/Build/Ask per D8), and the auto-title / quota extension bridges (D10); Zed design tokens (D11) with context menus, the tooltip, the extension dialog, the floating modal cards (provider usage / API-key / editor, update dialog, custom UI), the sidebar session / workspace rows, the transcript's message / card chrome, the settings section / group / row chrome, UI type on `TextSize` across every surface, corner radii on `Radius`, and one-shot UI motion on `Motion` roles migrated onto them.
 
 Finder file URLs and Windows CF_HDROP lists take precedence over clipboard preview images: pasted image files enter the image queue, and other files enter the existing file-reference queue. On Linux, file URI lists exposed as clipboard text use the same queue; GPUI cannot currently read file-only clipboard offers. Plain path text stays text.
 

@@ -21,6 +21,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { buildDescription, buildPromptGuidelines, discoverAgents, loadBuiltins, userAgentDir } from "./agents.js";
@@ -37,6 +38,7 @@ import {
   readWorkflowStore,
   resolveWorkflowMode,
 } from "./mode.js";
+import { openChildLog, pruneLogs } from "./log.js";
 import { parseBundledExtensions } from "./resources.js";
 import {
   BOUNDS,
@@ -422,6 +424,7 @@ export async function executeTool({ params, signal, onUpdate, ctx, pi, deps, cou
     sessionId,
     store: readWorkflowStore(path.join(deps.home ?? os.homedir(), ".orbit-pi", "workflow.json")),
     env: deps.env,
+    entries: branchEntries(ctx),
   });
   const allowed = allowedCeiling(accessMode, workflowMode);
   // Settings → Permissions can pre-authorize a family for one agent, which is
@@ -500,6 +503,10 @@ export async function executeTool({ params, signal, onUpdate, ctx, pi, deps, cou
 
   const children = [];
   const progress = trailingProgress((force) => emitProgress(onUpdate, request.mode, children, force));
+  // One id per delegation names its children's live logs; last week's logs
+  // are cleared first. Both are display-only and never fail the run.
+  const runId = `${now().toString(36)}${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  pruneLogs({ home: deps.home, now: now() });
   const runOne = async (agent, task) => {
     const state = newChildState({
       id: `c${children.length + 1}`,
@@ -519,7 +526,9 @@ export async function executeTool({ params, signal, onUpdate, ctx, pi, deps, cou
       sessionId,
       parentModel: modelId(ctx?.model),
       parentThinking: typeof ctx?.thinkingLevel === "string" ? ctx.thinkingLevel : null,
+      parentCwd: ctx?.cwd,
       onProgress: progress.push,
+      runId,
     });
   };
 
@@ -611,6 +620,43 @@ function safeSessionId(ctx) {
   } catch {
     return "unknown";
   }
+}
+
+/** The resumed branch is the workflow extension's final on-disk fallback. */
+function branchEntries(ctx) {
+  try {
+    return ctx?.sessionManager?.getBranch?.() ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve a workspace identity for trust decisions. Symlinks are collapsed
+ * when the path exists; a missing/inaccessible path still gets a lexical
+ * identity rather than making delegation fail. Blank/unusable input stays
+ * unknown and can never establish trust.
+ */
+export function canonicalWorkspace(cwd) {
+  if (typeof cwd !== "string" || cwd.trim() === "") return null;
+  let resolved;
+  try {
+    resolved = path.resolve(cwd);
+  } catch {
+    return null;
+  }
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+/** Project trust and MCP secrets may cross only inside this one workspace. */
+export function sameCanonicalWorkspace(parentCwd, childCwd) {
+  const parent = canonicalWorkspace(parentCwd);
+  const child = canonicalWorkspace(childCwd);
+  return parent !== null && child !== null && parent === child;
 }
 
 function modelId(model) {
@@ -719,7 +765,9 @@ export async function runChild(state, {
   sessionId,
   parentModel,
   parentThinking,
+  parentCwd,
   onProgress,
+  runId = null,
 }) {
   const now = deps.now;
   const systemPrompt = assemblePrompt({ body: agent?.body ?? "" });
@@ -740,6 +788,7 @@ export async function runChild(state, {
     return state;
   }
 
+  const sameWorkspace = sameCanonicalWorkspace(parentCwd, state.cwd);
   const argv = buildArgv({
     promptPath,
     prompt: `Task: ${state.task}`,
@@ -749,13 +798,16 @@ export async function runChild(state, {
     tools: agent?.tools ?? null,
     toolsPresent: agent?.toolsPresent === true,
     ceiling: state.capability,
+    approveProject: sameWorkspace && deps.env?.ORBIT_PROJECT_TRUST === "1",
   });
-  const env = { ...deps.env, ORBIT_SUBAGENT_STATUS_TOKEN: "", ...buildEnv({
+  const env = buildEnv({
+    parentEnv: deps.env,
+    sameWorkspace,
     parentSessionId: sessionId,
     agentName: state.agent,
     ceiling: state.capability,
     workflowMode: state.workflowMode,
-  }) };
+  });
 
   let child;
   try {
@@ -781,13 +833,21 @@ export async function runChild(state, {
 
   let stderr = "";
   const decoder = new LineDecoder();
+  // pi's own event lines, kept verbatim for Orbit's live transcript of this
+  // child. `log` is null when no run id was given or the file can't be made.
+  const log = runId === null ? null : openChildLog({ home: deps.home, run: runId, child: state.id });
+  if (log) state.log = log.path;
   const consume = (line) => {
     const event = parseRecord(line);
     if (event) applyEvent(state, event, now());
   };
+  const consumeAll = (lines) => {
+    log?.append(lines.filter((line) => line.trim() !== ""));
+    for (const line of lines) consume(line);
+  };
 
   child.stdout?.on?.("data", (chunk) => {
-    for (const line of decoder.push(chunk)) consume(line);
+    consumeAll(decoder.push(chunk));
     onProgress?.(false);
   });
   child.stderr?.on?.("data", (chunk) => {
@@ -831,7 +891,8 @@ export async function runChild(state, {
     abortPromise.then(() => setTimeout(() => finish(1), 3500).unref?.());
   });
 
-  for (const line of decoder.end()) consume(line);
+  consumeAll(decoder.end());
+  log?.close();
   if (timer) clearTimeout(timer);
   if (onAbort) signal?.removeEventListener?.("abort", onAbort);
   removePromptDir(promptDir);

@@ -222,6 +222,9 @@ crates/orbit-pi/        GPUI app — window, shell, chat, settings
   src/workflow.rs       workflow mode (Plan / Build / Ask): per-session persistence to `~/.orbit-pi/workflow.json`, which the workflow extension reads
   src/subagent_file.rs  the agent file format: a lenient reader for `~/.pi/agent/agents/*.md` and a surgical writer that changes only the five keys Orbit owns (name, description, model, thinking, tools), preserving comments, key order, foreign keys and the body
   src/subagents.rs      the Orbit-only half of an agent: `~/.orbit-pi/subagents.json` (enabled, pinned workflow mode, limits), lenient + atomic, preserved for unknown entry fields
+  src/subagent_log.rs   a delegated child's live transcript: tails the extension's event log
+                        (`~/.orbit-pi/subagent-logs/`, trusted paths only) off the UI thread and
+                        feeds pi's own events into a second `Transcript` for its side-pane tab (D24)
   src/subagent.rs       the delegation card's pure half: parses the `subagent/1` details payload leniently and exposes the run's facts (live activity, counts, usage, elapsed); unknown shapes degrade to the generic activity card
   src/bundled_extensions.rs  materializes the bundled pi extensions (quota bridge + access guard + auto-title + workflow + subagents) under `~/.orbit-pi/`, spawns every session with `--extension`, and exports the entry points as `ORBIT_BUNDLED_EXTENSIONS` for child sessions
   src/commit_message.rs one-shot, tool-free `pi -p` conventional-commit generation
@@ -305,7 +308,9 @@ contrib/orbit-subagents-extension/  Orbit's bundled pi extension (loaded with
                         argv/env/prompt + JSONL fold; mode.js reads
                         `~/.orbit-pi/{subagents,workflow,access}.json` and decides
                         what the session mode permits; resources.js forwards the
-                        inherited guardrail extensions. All `node --test` covered
+                        inherited guardrail extensions; log.js tees each child's
+                        event lines into `~/.orbit-pi/subagent-logs/` for its live
+                        tab (D24). All `node --test` covered
 assets/icons/           logo-icon.png app-icon source + icon.icns / icon.ico / icon.png
                         + alpha-logo.png / alpha-logo.icns (macOS debug builds)
 PRODUCT.md  INTENT.md  README.md  AGENTS.md  PRIVACY.md
@@ -612,6 +617,7 @@ These compiled and ran against the pinned version. When in doubt, check
 - **Custom text input:** there is no multi-line editor widget we use. `ComposerInput` is an `EntityInputHandler` adapted from gpui's `input` example (grapheme-aware caret, clipboard, IME stubbed). Keep it single-line until a deliberate composer upgrade (INTENT.md risk #3).
 - **Key-binding precedence:** bindings are ordered by dispatch-tree depth (deepest/focused node first); ties at the same depth break by **registration order (later wins)**. Bindings with no context count as the deepest depth. The picker filter uses `.with_key_context("Composer Picker")` so backspace still edits, and picker `enter`/`escape`/`arrows` are registered **after** composer bindings in `main.rs` so they win over `Submit` / `AbortRun`.
 - **Popovers:** `anchored().position_mode(AnchoredPositionMode::Local).anchor(Corner::BottomLeft).offset(…).snap_to_window()` + `deferred(entity)` paints a floating popup (`ui::popover::anchored_popover`). Dismiss with `PopoverExt::dismiss_on_outside` (occlude + `on_mouse_down_out`; never call `on_mouse_down_out` directly). **Click-through:** the same click's mouse-up would re-open the chip — the owner's `DismissGuard` is `arm()`ed on dismiss and the trigger returns early when `swallows()`. Layered `BoxShadow`es (`vec![contact, ambient]`) read as a real modal surface.
+- **Picker widths are definite:** give a picker popover a fixed (rem-token) width such as `picker::compact_width`, never `min_w`/`max_w` alone. A shrink-to-fit popover leaves a row's `flex_1` text column no room to grow, so the trailing check or tag collapses onto the label (`the_status_bar_picker_rows_tile_at_one_two_line_height` guards it). Long titles and details truncate and show in full on hover through `PickerRow`'s own tooltip.
 - **Picker lists:** **do not use `uniform_list` inside a `deferred` + `anchored` popover** — measured layout can collapse to height 0. Use `max_h` + `overflow_y_scroll` + `ScrollHandle` (Zed `ContextMenu` shape). Keyboard nav must `set_offset` to keep the highlighted row in view. `.on_hover` / `.on_click` live on *stateful* elements (`.id(...)` required).
 - **Assets:** implement `gpui::AssetSource` over `include_dir!` so packaged builds don't depend on cwd. SVG icons: `img("icons/….svg")` via helpers in `app.rs`. Provider marks live under `assets/icons/providers/`.
 - **Fonts:** `cx.text_system().add_fonts` for embedded `Symbols Nerd Font` (devicons) and the curated catalog under `assets/fonts/bundled/`. `assets::register_zed_fonts` loads IBM Plex Sans / Lilex; `assets::register_bundled_fonts` recursively loads the bundled faces so `theme::UI_FONTS` / `CODE_FONTS` resolve without an OS dependency. Each family is a statically instanced, subset 400/500/600/700 TTF with a normalized name table (one typographic family, unique PostScript names) so font-kit weight selection works.
@@ -638,9 +644,10 @@ These compiled and ran against the pinned version. When in doubt, check
 | `enter` / `escape` / `up` / `down` | Confirm / cancel / move | `Picker` (registered after Composer) |
 | `enter` / `escape` / `up` / `down` | Run / close / move | `AddMenu` (composer "+" menu; registered after Picker) |
 | `enter` / `escape` / `up` / `down` | Select / close / move | `AccessMenu` (composer access-mode picker) |
-| `enter` / `escape` / `up` / `down` / `home` / `end` | Open / close / move / first / last | `WorkInMenu` (worktree "Work in" picker) |
+| `enter` / `escape` / `up` / `down` / `home` / `end` / `right` | Open / close / move / first / last / open the Existing worktrees flyout | `WorkInMenu` (worktree "Work in" picker); inside the flyout its search field takes `Composer Picker` keys (↑/↓/Enter, Escape back to the picker) |
 | `enter` / `escape` / `up` / `down` / `home` / `end` | Confirm / cancel / move / first / last | `DialogSelect` (extension select dialog) |
 | `enter` / `escape` / `up` / `down` | Confirm / deny / move | `Approval` (inline access-guard bar) |
+| `enter` / `space` | Fold / unfold the focused transcript activity summary, tool row or thought row | `ActivityToggle` |
 | `alt-up` / `alt-down` | Move the row under the cursor in the sidebar — a project group, or a session inside its project (the pointer twin is dragging a header or a session row) | `Sidebar` |
 
 ## Pi CLI RPC protocol (official spec)

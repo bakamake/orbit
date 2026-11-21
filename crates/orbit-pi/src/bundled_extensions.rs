@@ -109,6 +109,7 @@ const SUBAGENTS_RUN_JS: &str = include_str!("../../../contrib/orbit-subagents-ex
 const SUBAGENTS_MODE_JS: &str = include_str!("../../../contrib/orbit-subagents-extension/mode.js");
 const SUBAGENTS_RESOURCES_JS: &str =
     include_str!("../../../contrib/orbit-subagents-extension/resources.js");
+const SUBAGENTS_LOG_JS: &str = include_str!("../../../contrib/orbit-subagents-extension/log.js");
 const SUBAGENTS_BUILTINS_JSON: &str =
     include_str!("../../../contrib/orbit-subagents-extension/builtins.json");
 
@@ -121,6 +122,7 @@ const SUBAGENTS_FILES: &[(&str, &str)] = &[
     ("run.js", SUBAGENTS_RUN_JS),
     ("mode.js", SUBAGENTS_MODE_JS),
     ("resources.js", SUBAGENTS_RESOURCES_JS),
+    ("log.js", SUBAGENTS_LOG_JS),
     ("builtins.json", SUBAGENTS_BUILTINS_JSON),
 ];
 
@@ -213,9 +215,10 @@ impl BundledExtensions {
         workspace: &Path,
         apply_default: bool,
         env: &[(String, String)],
+        approve_project: bool,
     ) -> anyhow::Result<PiClient> {
         let routes = crate::provider_accounts::ProviderAccounts::load().routes()?;
-        self.spawn_with_accounts(workspace, apply_default, env, &routes)
+        self.spawn_with_accounts(workspace, apply_default, env, &routes, approve_project)
     }
 
     /// Spawn using an explicit per-session credential route snapshot. An
@@ -226,6 +229,7 @@ impl BundledExtensions {
         apply_default: bool,
         env: &[(String, String)],
         routes: &str,
+        approve_project: bool,
     ) -> anyhow::Result<PiClient> {
         // A `pi update` can restore the pristine RPC bundle while Orbit is
         // running; re-check before every spawn so a session switch or Runtime
@@ -243,12 +247,23 @@ impl BundledExtensions {
         };
         let extensions = self.extension_paths();
         let bundled = self.guardrails_json();
+        // The extension sees names only, never values: cross-workspace
+        // children must remove exactly the secrets their parent received,
+        // including hand-written store keys without an MCP_ prefix.
+        let mcp_secret_names = serde_json::to_string(
+            &env.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        )?;
         let mut env_refs: Vec<(&str, &str)> = env
             .iter()
             .filter(|(key, _)| key != "ORBIT_AUTH_PROFILE_ROUTES")
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
         env_refs.push(("ORBIT_AUTH_PROFILE_ROUTES", routes));
+        env_refs.push(("ORBIT_MCP_SECRET_NAMES", mcp_secret_names.as_str()));
+        env_refs.push((
+            "ORBIT_PROJECT_TRUST",
+            if approve_project { "1" } else { "0" },
+        ));
         // A child session does not inherit extensions implicitly: the subagent
         // tool reads this list and passes each path on as `--extension`.
         if let Some(bundled) = bundled.as_deref() {
@@ -260,6 +275,7 @@ impl BundledExtensions {
             &extensions,
             &env_refs,
             &args,
+            approve_project,
         )
     }
 
@@ -277,6 +293,7 @@ impl BundledExtensions {
         target: &RemoteTarget,
         password: Option<&str>,
         workflow: Option<&str>,
+        approve_project: bool,
     ) -> anyhow::Result<PiClient> {
         if self.guard.is_none() {
             anyhow::bail!(
@@ -296,7 +313,14 @@ impl BundledExtensions {
         // Remote profiles are unsupported; never forward local auth paths,
         // even when an ssh SendEnv rule would otherwise inherit them.
         // A resume carries no workflow mode: the session's own record decides.
-        let mut env = vec![("ORBIT_AUTH_PROFILE_ROUTES", "{}")];
+        let mut env = vec![
+            ("ORBIT_AUTH_PROFILE_ROUTES", "{}"),
+            ("ORBIT_MCP_SECRET_NAMES", "[]"),
+            (
+                "ORBIT_PROJECT_TRUST",
+                if approve_project { "1" } else { "0" },
+            ),
+        ];
         if let Some(mode) = workflow {
             env.insert(0, ("ORBIT_WORKFLOW_MODE", mode));
         }
@@ -304,6 +328,7 @@ impl BundledExtensions {
             guard: &REMOTE_GUARD_FILES,
             extensions: &REMOTE_EXTENSIONS,
             env: &env,
+            approve_project,
         };
         PiClient::spawn_remote_with_bin("ssh", target, &launch, password)
     }
@@ -613,6 +638,7 @@ mod tests {
                 guard: &REMOTE_GUARD_FILES,
                 extensions: &REMOTE_EXTENSIONS,
                 env: &env,
+                approve_project: false,
             },
         )
         .expect("the shipped files are valid heredocs");
