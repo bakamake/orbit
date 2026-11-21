@@ -3,6 +3,10 @@ deleting the open task."""
 
 GLOSSARY = {
     'zh-CN': {
+        'This device': '本机',
+        'Remote': '远程',
+        'Add remote host…': '添加远程主机…',
+        'Run the agent on a server over SSH': '通过 SSH 在服务器上运行代理',
         'Not available while this task is running.': '此任务运行期间不可用。',
         'Stop the run before deleting this session': '请先停止运行，再删除此会话',
         'Rename…': '重命名…',
@@ -13,6 +17,10 @@ GLOSSARY = {
         'Branch from a message…': '从某条消息创建分支…',
     },
     'ja': {
+        'This device': 'このデバイス',
+        'Remote': 'リモート',
+        'Add remote host…': 'リモートホストを追加…',
+        'Run the agent on a server over SSH': 'SSH 経由でサーバー上でエージェントを実行',
         'Not available while this task is running.': 'このタスクの実行中は使用できません。',
         'Stop the run before deleting this session': 'このセッションを削除する前に実行を停止してください',
         'Rename…': '名前を変更…',
@@ -23,6 +31,10 @@ GLOSSARY = {
         'Branch from a message…': 'メッセージから分岐…',
     },
     'ko': {
+        'This device': '이 기기',
+        'Remote': '원격',
+        'Add remote host…': '원격 호스트 추가…',
+        'Run the agent on a server over SSH': 'SSH로 서버에서 에이전트 실행',
         'Not available while this task is running.': '이 작업이 실행 중일 때는 사용할 수 없습니다.',
         'Stop the run before deleting this session': '이 세션을 삭제하기 전에 실행을 중지하세요',
         'Rename…': '이름 바꾸기…',
@@ -33,6 +45,10 @@ GLOSSARY = {
         'Branch from a message…': '메시지에서 분기…',
     },
     'es': {
+        'This device': 'Este dispositivo',
+        'Remote': 'Remoto',
+        'Add remote host…': 'Añadir host remoto…',
+        'Run the agent on a server over SSH': 'Ejecuta el agente en un servidor por SSH',
         'Not available while this task is running.': 'No disponible mientras esta tarea se ejecuta.',
         'Stop the run before deleting this session': 'Detén la ejecución antes de eliminar esta sesión',
         'Rename…': 'Cambiar nombre…',
@@ -43,6 +59,10 @@ GLOSSARY = {
         'Branch from a message…': 'Ramificar desde un mensaje…',
     },
     'fr': {
+        'This device': 'Cet appareil',
+        'Remote': 'Distant',
+        'Add remote host…': 'Ajouter un hôte distant…',
+        'Run the agent on a server over SSH': 'Exécuter l’agent sur un serveur via SSH',
         'Not available while this task is running.': 'Indisponible pendant l’exécution de cette tâche.',
         'Stop the run before deleting this session': 'Arrêtez l’exécution avant de supprimer cette session',
         'Rename…': 'Renommer…',
@@ -53,6 +73,10 @@ GLOSSARY = {
         'Branch from a message…': 'Créer une branche depuis un message…',
     },
     'de': {
+        'This device': 'Dieses Gerät',
+        'Remote': 'Remote-Hosts',
+        'Add remote host…': 'Remote-Host hinzufügen…',
+        'Run the agent on a server over SSH': 'Den Agenten per SSH auf einem Server ausführen',
         'Not available while this task is running.': 'Nicht verfügbar, während diese Aufgabe läuft.',
         'Stop the run before deleting this session': 'Stoppe den Lauf, bevor du diese Sitzung löschst',
         'Rename…': 'Umbenennen…',
@@ -63,6 +87,10 @@ GLOSSARY = {
         'Branch from a message…': 'Von einer Nachricht abzweigen…',
     },
     'pt-BR': {
+        'This device': 'Este dispositivo',
+        'Remote': 'Remoto',
+        'Add remote host…': 'Adicionar host remoto…',
+        'Run the agent on a server over SSH': 'Execute o agente em um servidor via SSH',
         'Not available while this task is running.': 'Indisponível enquanto esta tarefa está em execução.',
         'Stop the run before deleting this session': 'Pare a execução antes de excluir esta sessão',
         'Rename…': 'Renomear…',
@@ -73,6 +101,10 @@ GLOSSARY = {
         'Branch from a message…': 'Ramificar a partir de uma mensagem…',
     },
     'ru': {
+        'This device': 'Это устройство',
+        'Remote': 'Удалённо',
+        'Add remote host…': 'Добавить удалённый хост…',
+        'Run the agent on a server over SSH': 'Запускать агента на сервере по SSH',
         'Not available while this task is running.': 'Недоступно, пока выполняется эта задача.',
         'Stop the run before deleting this session': 'Остановите выполнение, прежде чем удалять этот сеанс',
         'Rename…': 'Переименовать…',
@@ -83,6 +115,10 @@ GLOSSARY = {
         'Branch from a message…': 'Ответвить от сообщения…',
     },
     'it': {
+        'This device': 'Questo dispositivo',
+        'Remote': 'Remoto',
+        'Add remote host…': 'Aggiungi host remoto…',
+        'Run the agent on a server over SSH': 'Esegui l’agente su un server via SSH',
         'Not available while this task is running.': 'Non disponibile mentre questa attività è in esecuzione.',
         'Stop the run before deleting this session': 'Interrompi l’esecuzione prima di eliminare questa sessione',
         'Rename…': 'Rinomina…',

@@ -4642,7 +4642,6 @@ enum SettingsSelect {
     TerminalFont,
     EditorFont,
     SpacingDensity,
-    CornerRounding,
     UiFontFamily,
     CodeFontFamily,
     WallpaperEffect,

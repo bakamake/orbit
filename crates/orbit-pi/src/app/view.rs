@@ -843,7 +843,8 @@ impl Render for OrbitApp {
                                 .w(px(6.))
                                 .on_drag(SidebarResize, |_, _, _, cx| cx.new(|_| DragGhost)),
                             )
-                            // Search and session actions share a stable toolbar.
+                            // Search and the list's view options; the creation
+                            // actions get their own row just below (#166).
                             .child(
                                 div()
                                     .px_2()
@@ -866,6 +867,7 @@ impl Render for OrbitApp {
                                         theme,
                                     )),
                             )
+                            .child(self.sidebar_create_actions(theme, cx))
                             // session list (scrolls), grouped by workspace — or
                             // one flat list when grouping is off. The section
                             // header stays mounted either way so the view
@@ -881,13 +883,10 @@ impl Render for OrbitApp {
                                     // label, then a hairline to the edge, so
                                     // the section reads as a heading without a
                                     // box. The left inset matches a project
-                                    // header's chevron column; the right
-                                    // inset leaves the New project button
-                                    // over the project rows' trailing column.
+                                    // header's chevron column.
                                     .child(
                                         div()
-                                            .pl(DynamicSpacing::Base16.px(&theme))
-                                            .pr(DynamicSpacing::Base08.px(&theme))
+                                            .px(DynamicSpacing::Base16.px(&theme))
                                             .pt(DynamicSpacing::Base04.px(&theme))
                                             .flex()
                                             .items_center()
@@ -934,8 +933,7 @@ impl Render for OrbitApp {
                                                     .min_w(DynamicSpacing::Base16.px(&theme))
                                                     .h(BORDER_WIDTH)
                                                     .bg(theme.hairline_subtle()),
-                                            )
-                                            .child(self.sidebar_new_project_button(theme, cx)),
+                                            ),
                                     )
                                     .child(if side_rows.is_empty() {
                                         if self.sidebar_query.is_empty() {
@@ -4182,26 +4180,56 @@ impl OrbitApp {
         )
     }
 
-    /// The Projects section's **New project** action: add a folder to the
-    /// sidebar as a project (#166). It replaced the search row's New Task
-    /// button, which only duplicated each project's own `+` and ⌘N.
-    pub(super) fn sidebar_new_project_button(
+    /// The sidebar's creation row (#166), on its own line under search:
+    /// **New project** (add a folder without starting a task) as a compact
+    /// icon button at the leading edge, and **New session** (a task in the
+    /// current project, ⌘N) filling the rest with its label — the everyday
+    /// action gets the room, the occasional one stays one click away. Both
+    /// share secondary chrome so they read as one pair of controls.
+    pub(super) fn sidebar_create_actions(
         &self,
         theme: Theme,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
-        IconButton::new("sidebar-new-project", "icons/folder-plus.svg")
-            .size(ButtonSize::Compact)
+        let new_session = Button::new("sidebar-new-session", ButtonVariant::Secondary)
+            .size(ButtonSize::Medium)
+            .icon("icons/task-edit-01.svg")
+            .label(tr!("sidebar.new_session"))
+            .tip(crate::commands::tooltip(
+                crate::commands::CommandId::NewSession,
+                false,
+            ))
+            .on_mouse_up(
+                &theme,
+                cx.listener(|this, _: &MouseUpEvent, window, cx| {
+                    this.on_new_session(&crate::NewSession, window, cx)
+                }),
+            )
+            .flex_1()
+            .min_w_0();
+        let new_project = Button::new("sidebar-new-project", ButtonVariant::Secondary)
+            .size(ButtonSize::Medium)
+            .icon("icons/folder-plus.svg")
+            // Icon only: the tooltip names it (with its shortcut).
             .tip(crate::commands::tooltip(
                 crate::commands::CommandId::NewProject,
                 false,
             ))
             .on_mouse_up(
                 &theme,
-                cx.listener(|this, _: &MouseUpEvent, window, cx| {
-                    this.new_project(window, cx)
-                }),
+                cx.listener(|this, _: &MouseUpEvent, window, cx| this.new_project(window, cx)),
             )
+            .flex_none()
+            // Square: as wide as the row is tall, the same edge as New session.
+            .w(ButtonSize::Medium.height(&theme));
+        div()
+            .px_2()
+            .pb(DynamicSpacing::Base06.px(&theme))
+            .flex()
+            .items_center()
+            .gap(DynamicSpacing::Base06.px(&theme))
+            .child(new_project)
+            .child(new_session)
     }
 
     /// The sidebar footer's utility icons: Git, Usage and Settings. Icon-only —
@@ -4776,7 +4804,13 @@ impl OrbitApp {
         };
         // Bespoke: the composer's round send/stop controls morph, fill with
         // the action role and own their press ramps.
-        icon_button_frame(div().id("stop-btn"), &theme, ButtonSize::Medium)
+        icon_button_frame(
+            div()
+                .id("stop-btn")
+                .debug_selector(|| "stop-btn".to_string()),
+            &theme,
+            ButtonSize::Medium,
+        )
             .group(BUTTON_GROUP)
             .rounded_full()
             .raised(theme.surface_elevated, &theme)
@@ -4785,8 +4819,13 @@ impl OrbitApp {
             .cursor_pointer()
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_abort_mouse))
             .tooltip(move |_, cx| cx.new(|_| Tooltip::new(tooltip.clone())).into())
+            // A filled square inside its 24-unit box, so it carries the same
+            // optical weight as Send's glyph beside it. The old `stop-run`
+            // mark was a full disc with a square cut out: it filled the whole
+            // box edge to edge and read as a heavier circle inside the round
+            // button, larger than Send at the same 28px (#166).
             .child(icon(
-                "icons/stop-run.svg",
+                "icons/stop-square.svg",
                 ButtonSize::Medium.icon_size().px(&theme),
                 if stopping {
                     theme.text_muted

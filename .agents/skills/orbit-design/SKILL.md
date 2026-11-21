@@ -65,7 +65,7 @@ Resolve tokens through the current theme and verify scaling at the call site.
 | Color | Semantic `Theme` roles for canvas, surfaces, text, border, focus, action, selection, status, code and syntax across thirteen dark and light palettes. Accent and action are separate roles. See §Colour roles and theme compatibility. |
 | Text | `TextSize`: 11, 12, 14, 16px default reference, plus UI/editor preferences. `HeadlineSize` and `BufferLineHeight` provide additional scales. UI and monospace families serve different roles. |
 | Spacing | `DynamicSpacing`: 0, 1, 2, 3, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48 at default settings; density and UI scaling apply. |
-| Radius | `Radius::px`: 4, 6, 9, 12px, and full, before the corner-rounding preference. Use component role tokens rather than assuming a radius from an enum name. |
+| Radius | `Radius::px`: 4, 6, 9, 12px, and full, fixed (no user preference). Use component role tokens rather than assuming a radius from an enum name. |
 | Controls | `ButtonSize` reference heights: 16, 18, 22, 28, 32px; `IconSize` has 10, 12, 14, 16 and 48px plus custom. |
 | Border and focus | `BORDER_WIDTH` is 1px, and the focus ring is a `BORDER_WIDTH` border in `focus_ring`. Validate that focus remains visible in real contexts rather than copying a web outline rule. |
 | Depth | Quiet structural surfaces; `ElevationIndex` gives floating surfaces and modals soft shadows. |
@@ -73,8 +73,8 @@ Resolve tokens through the current theme and verify scaling at the call site.
 
 The values above are resolved by their respective tokens; they do not all scale
 in the same way. `TextSize::XSmall` resolves to 11px despite its stale 10px
-comment. A palette never changes geometry, but user font size, spacing density
-and corner-rounding preferences can. Do not hardcode reference dimensions in
+comment. A palette never changes geometry, but user font size and spacing
+density preferences can. Do not hardcode reference dimensions in
 new components where a semantic token already exists.
 
 ### Normative scale and role mapping
@@ -86,7 +86,7 @@ All pixel values here are base values before user preferences, unless noted.
 | UI typography | Default 14px, large 16px, small 12px, extra-small 11px; use `TextSize` and user-adjustable UI/editor sizes. Use the UI family for interface text and the monospace family for code; preserve platform fallback. |
 | Headings and leading | Use `TextSize::Large` for page titles and `HeadlineSize` for modal headlines. Buffer line-height roles are 1.3 (`Standard`) and 1.618 (`Comfortable`); select per context and respect custom settings. Do not apply global tracking. |
 | Density | `DynamicSpacing` resolves the listed 14-step scale at compact 80%, default 100%, and comfortable 120%, interpolating between anchors before UI font scaling. Use semantic gaps and insets consistently. |
-| Corners | `Small` 4, `Medium` 6, `Large` 9, `XLarge` 12, `Full` 9999px. The corner-rounding preference adds up to 4px to non-full steps; it is not density- or font-scaled. |
+| Corners | `Small` 4, `Medium` 6, `Large` 9, `XLarge` 12, `Full` 9999px. Fixed: no preference, density or font size scales them. |
 | Component corners | Compact/none buttons and list entries use `Medium` 6px; default/medium/large buttons and inputs use `Large` 9px; the chat composer has a fixed 12px radius independent of preferences; panels use `XLarge` 12px; modal cards use 16px; badges are fully rounded. Resolve through component tokens. |
 | Controls | Button heights are `None` 16, `Compact` 18, `Default` 22, `Medium` 28 and `Large` 32px before UI scaling. Match the icon to the button's `icon_size`; the icon scale is 10, 12, 14, 16 and 48px, plus custom. Visual size is not proof of usable hit area. |
 | Edges and depth | Borders and focus rings are 1px. Keep structural regions calm; floating surfaces combine frosted or opaque fills with a fine edge and a soft shadow. Focus remains distinct from selection. |
@@ -149,8 +149,8 @@ consecutive ramp step — `surface_elevated` → `surface_hover` →
 the muted ink that is read on top of it.
 
 **The Geometry Rule.** A palette never changes geometry. A role change may not
-move a border, a radius, a size or a line height; only the user's font size,
-spacing density and corner-rounding preferences do.
+move a border, a radius, a size or a line height; only the user's font size
+and spacing density preferences do.
 
 ## Component and interaction contract
 
@@ -267,7 +267,7 @@ shipped tokens or instructions to add abstractions prematurely:
    line height, long translations, large text, fallback fonts and tabular numbers
    where GPUI/font support is confirmed. Avoid a global tracking adjustment.
 2. **Radius roles:** map actual control, input, menu, panel, dialog and composer
-   uses to resolved tokens, including rounding preferences. Keep documentation
+   uses to resolved tokens. Keep documentation
    aligned with `Radius::px`. No new radius is justified solely to match Apple
    or Linear.
 3. **Spacing and hit targets:** document semantic inset/gap roles and practical

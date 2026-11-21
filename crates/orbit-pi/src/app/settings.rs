@@ -489,11 +489,6 @@ const SETTINGS_SEARCH_INDEX: &[(SettingsSection, &str, &str)] = &[
     ),
     (
         SettingsSection::Appearance,
-        "settings.corner_rounding",
-        "corner rounding radius rounded shape",
-    ),
-    (
-        SettingsSection::Appearance,
         "settings.show_sidebar",
         "sidebar show layout navigation",
     ),
@@ -6238,18 +6233,6 @@ impl OrbitApp {
                     ),
                     self.setting_row(
                         theme,
-                        &tr!("settings.corner_rounding"),
-                        Some(&tr!("settings.corner_rounding_description")),
-                        None,
-                        Some(self.preset_select(
-                            SettingsSelect::CornerRounding,
-                            theme,
-                            this.clone(),
-                            cx,
-                        )),
-                    ),
-                    self.setting_row(
-                        theme,
                         &tr!("settings.spacing_density"),
                         None,
                         None,
@@ -7644,11 +7627,6 @@ impl OrbitApp {
                 theme.ui.spacing_density as f32,
                 "%",
             ),
-            SettingsSelect::CornerRounding => (
-                (0..=theme::MAX_CORNER_ROUNDING).map(|v| v as f32).collect(),
-                theme.ui.corner_rounding as f32,
-                "px",
-            ),
             SettingsSelect::Language
             | SettingsSelect::SuggestionsModel
             | SettingsSelect::ReportModel
@@ -7678,7 +7656,6 @@ impl OrbitApp {
                 SettingsSelect::TerminalFont => "terminal-font-select",
                 SettingsSelect::EditorFont => "editor-font-select",
                 SettingsSelect::SpacingDensity => "spacing-density-select",
-                SettingsSelect::CornerRounding => "corner-rounding-select",
                 _ => "settings-select",
             },
             kind,
@@ -8396,9 +8373,6 @@ impl OrbitApp {
             }
             SettingsSelect::SpacingDensity => {
                 ui.spacing_density = SPACING_DENSITIES.get(ix).copied().unwrap_or(100);
-            }
-            SettingsSelect::CornerRounding => {
-                ui.corner_rounding = (ix as u32).min(theme::MAX_CORNER_ROUNDING);
             }
             SettingsSelect::SuggestionsModel
             | SettingsSelect::ReportModel

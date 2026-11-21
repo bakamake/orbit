@@ -7,19 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **New switch style.** Every settings switch now uses a rounded-rectangle
+  track with a rounded-square knob that slides across; it turns green when
+  on. The design is adapted from RaspberryBee's Uiverse.io switch (MIT).
 - **Sidebar projects, easier to read and manage** (#166). The Projects label,
   project names and project icons are larger. A project's ⋯ menu has
   **Rename…**: the new name shows in the sidebar only, and the folder on disk
-  is never renamed (leave the field empty to go back to the folder name). The
-  search row's New Task button is gone, since each project's `+` and ⌘N
-  already start a task; the Projects header now has a **New project** button
-  instead.
+  is never renamed (leave the field empty to go back to the folder name).
+  **New session** and **New project** now have their own row under search:
+  a small **New project** button on the left and a wide **New session** button
+  on the right. The search row keeps only search and the view menu.
 - **Delete the open task** (#166). **Delete session…** now works on the task
   you have open: Orbit opens a new task, stops the old task's pi process, then
   deletes the file. It stays disabled only while a run is in progress. The
   command palette's Delete Session uses the same safe path.
 - **Branch from a message…** (#166) in a task's menu opens the message picker
   for that task, so you can start a new task from any earlier turn.
+- **Work in picker, reorganised** (#166). The new-task page's **Work in**
+  picker now has two labelled sections instead of hairlines: **This device**
+  (current checkout, New worktree, Existing worktrees) and **Remote** (your
+  SSH hosts, Add this project to a server…, and a new **Add remote host…**
+  row). Remote is always there, even before you set up a host: Add remote
+  host… opens Settings → Remote hosts with the form ready. The Experimental tag
+  now sits once on the Remote label instead of on every host.
+- **Stop matches Send.** The composer's Stop button now shows a small filled
+  square instead of a full circle with a square cut out. The old mark filled its
+  whole icon box and looked like a bigger, heavier circle inside the round
+  button, so Stop read larger than Send even though both are 28px.
+- **Corner rounding setting removed.** Settings → Appearance no longer has a
+  Corner rounding control; Orbit's corners are fixed at their standard sizes.
+  A value saved by an earlier version is ignored.
 - **First launch no longer uses Orbit's own folder as the project** (#166). A
   launch from the Dock, Start menu or a shortcut with no remembered folder now
   starts in your home folder instead of the install directory (Windows) or `/`.

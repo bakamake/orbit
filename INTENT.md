@@ -609,7 +609,7 @@ boards can frost the workbench without wallpaper, while full-window wallpaper
 and accessibility preferences continue to control the fallback.
 
 The shared workbench geometry uses 6px compact controls and rows, 9px standard
-controls, 12px cards and 16px dialogs before the rounding preference. Floating surfaces use
+controls, 12px cards and 16px dialogs (fixed; the Corner rounding setting was removed in #166). Floating surfaces use
 soft shadows alongside their existing contrast-controlled frost and opaque
 fallbacks; the semantic palette roles remain unchanged.
 
@@ -737,8 +737,10 @@ refuses a filesystem root, the home folder, a folder that contains another
 project, and a folder a live task still works in, and its cases are covered in
 `sidebar_remove_tests`. **New project…** (command palette) adds a folder to the sidebar with no pi session
 (`OrbitApp::new_project` → `add_workspace`); since #166 it is also a
-button on the sidebar's Projects header, which replaced the search row's New
-Task button. #166 also adds a project display name (`WorkspaceMark::name`,
+labelled button beside New session on the sidebar's own creation row under
+search (`sidebar_create_actions`: a square icon-only New project leading, a labelled New session filling the rest, both Secondary); the search row
+keeps search and the view menu. `Button` labels now truncate with an ellipsis
+when their row squeezes them. #166 also adds a project display name (`WorkspaceMark::name`,
 stored as `name` in `workspaces.json` beside icon and tint, edited from the
 header menu's **Rename…** in `app/project_rename_ui.rs`): the group's identity
 stays the folder label, so a rename moves no collapsed state, order or pin.
@@ -749,7 +751,13 @@ removing the file. The session menu's **Branch from a message…** opens the
 rewind picker, switching to the session first and waiting for its `get_state`
 like Rename. A launch with no remembered folder uses `first_launch_workspace`:
 the process cwd unless it is a filesystem root or inside the executable's
-directory, otherwise the home folder. Settings → Providers & models renders
+directory, otherwise the home folder. The **Work in** picker groups its rows
+under two section labels painted inside the first row of each section
+(`work_in_section_start`, so the row count `scroll_to_item` uses is
+unchanged): **This device** and **Remote**, the latter carrying the single
+Experimental tag. Remote always ends with `WorkInRow::AddRemoteHost`, which
+opens Settings → Remote hosts with the add-host form (the form is painted by
+Settings). Settings → Providers & models renders
 connected and unconnected providers as rows on two grouped boards (the shared
 `settings_group` surface, not a card grid). A row's head is one line — brand mark, name,
 status, one truncated facts line, and on the right only the model count, the first

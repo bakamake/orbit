@@ -58,7 +58,7 @@ impl Theme {
 
 // ── Corner radius + borders (`gpui_macros/src/styles.rs`) ───────────────
 
-/// Orbit's corner scale, in pixels before the corner-rounding preference.
+/// Orbit's corner scale, in pixels. Fixed: there is no user rounding setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Radius {
     /// 4px.
@@ -77,21 +77,14 @@ impl Radius {
     /// One radius ramp for every palette. Shapes are
     /// part of the design language, not of a palette, so Orbit Azure and
     /// Operational draw the same button and the same card.
-    ///
-    /// The user's corner-rounding setting still shifts every corner except
-    /// [`Radius::Full`], which stays circular.
-    pub fn px(self, theme: &Theme) -> Pixels {
-        let base = match self {
-            Self::Full => return px(9999.),
+    pub fn px(self, _theme: &Theme) -> Pixels {
+        match self {
+            Self::Full => px(9999.),
             Self::Small => px(4.),
             Self::Medium => px(6.),
             Self::Large => px(9.),
             Self::XLarge => px(12.),
-        };
-        base + px(theme
-            .ui
-            .corner_rounding
-            .min(crate::theme::MAX_CORNER_ROUNDING) as f32)
+        }
     }
 }
 
@@ -437,8 +430,7 @@ pub mod list_item {
 pub mod panel {
     use super::*;
 
-    /// Standard panel/card corner: 12px before the rounding preference,
-    /// shared by all palettes.
+    /// Standard panel/card corner: 12px, shared by all palettes.
     pub const RADIUS: Radius = Radius::XLarge;
 }
 
@@ -698,7 +690,7 @@ pub mod toast {
 pub mod modal {
     use super::*;
 
-    /// A modal is softer than a popover while following the rounding preference.
+    /// A modal is softer than a popover: the panel corner plus 4px.
     pub fn radius(theme: &Theme) -> Pixels {
         panel::RADIUS.px(theme) + px(4.)
     }
@@ -1213,13 +1205,17 @@ mod tests {
     use super::*;
     use crate::theme::UiPrefs;
 
+    /// The corner scale is fixed: no preference moves it, and pills stay
+    /// round. A UI font change must not move a corner either.
     #[test]
-    fn corner_rounding_adjusts_shared_shapes_without_changing_pills_or_square_edges() {
-        let mut theme = Theme::dark();
-        let base = Radius::Large.px(&theme);
-        theme.ui.corner_rounding = crate::theme::MAX_CORNER_ROUNDING;
-        assert_eq!(Radius::Large.px(&theme), base + px(4.));
-        assert_eq!(Radius::Full.px(&theme), px(9999.));
+    fn the_corner_scale_is_fixed() {
+        for theme in [Theme::dark(), theme_with(20., 120)] {
+            assert_eq!(Radius::Small.px(&theme), px(4.));
+            assert_eq!(Radius::Medium.px(&theme), px(6.));
+            assert_eq!(Radius::Large.px(&theme), px(9.));
+            assert_eq!(Radius::XLarge.px(&theme), px(12.));
+            assert_eq!(Radius::Full.px(&theme), px(9999.));
+        }
     }
 
     fn theme_with(ui_font_size: f32, spacing_density: u32) -> Theme {
@@ -1330,11 +1326,6 @@ mod tests {
         assert!(close(modal::radius(&theme), 16.));
         assert!(close(input::RADIUS.px(&theme), 9.));
         assert_eq!(input::composer_radius(&theme), px(12.));
-        let mut rounded = theme;
-        rounded.ui.corner_rounding = crate::theme::MAX_CORNER_ROUNDING;
-        assert_eq!(input::composer_radius(&rounded), px(12.));
-        assert_eq!(modal::radius(&rounded), modal::radius(&theme) + px(4.));
-        assert_ne!(input::RADIUS.px(&rounded), input::RADIUS.px(&theme));
         assert_eq!(list_item::RADIUS, Radius::Medium);
     }
 

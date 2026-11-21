@@ -27,7 +27,6 @@
   "ui/rail.rs": 1,
   "ui/resize.rs": 2,
   "ui/status_bar.rs": 1,
-  "ui/switch.rs": 1,
   "ui/tab.rs": 1,
   "ui/table.rs": 3,
   "ui/toast.rs": 2,

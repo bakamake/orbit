@@ -96,7 +96,7 @@ typography:
     fontFamily: ".ZedMono, Lilex, ui-monospace, monospace"
     fontSize: "13px"
     lineHeight: "20px"
-# Radius values are before the user's corner-rounding preference.
+# Radius values are fixed; no user preference changes them.
 rounded:
   sm: "4px"
   md: "6px"
@@ -429,7 +429,7 @@ names a palette family, not a shape language.
 header chips; `input::RADIUS` for text fields; `panel::RADIUS` for cards, panels,
 popovers, menus, and dialogs; `list_item::RADIUS` for navigation/list rows; and
 `Radius::Small` for badges and checkboxes. The chat composer uses its own fixed
-12px `input::composer_radius`, independent of the rounding preference. Fully round
+12px `input::composer_radius`. Fully round
 `Radius::Full` is reserved for genuinely circular or pill-shaped controls (send/stop
 actions, toggles, avatars, status dots, meters) and is not mixed into the rectangular
 card/field/button family.
@@ -521,7 +521,7 @@ list-board rows (`settings_group`, the MCP server rows).
 
 ## Shapes
 
-Corners are soft but restrained. Before the corner-rounding preference, list
+Corners are soft but restrained and fixed. List
 items and compact button frames use 6px, standard buttons and inputs use 9px,
 panels and popovers use 12px, and modal cards use 16px. The chat composer is fixed at 12px. `full` is
 reserved for circular or pill-shaped elements such as status dots, avatar
@@ -1792,9 +1792,8 @@ selection of a family does not guarantee every possible combination is verified.
 ### Geometry reference
 
 Spacing scales with UI font size and the Spacing Density setting; other values
-follow their own tokens. Radii are fixed pixel values plus the corner-rounding
-preference, except `None` and `Full`, which do not change. The radius values
-below are before that preference.
+follow their own tokens. Radii are fixed pixel values; no preference changes
+them.
 
 | Role | Value | Token |
 | -- | -- | -- |

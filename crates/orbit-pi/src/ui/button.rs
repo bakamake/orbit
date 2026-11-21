@@ -334,8 +334,11 @@ impl Button {
             Some(tip) => el.tip(tip),
             None => el,
         };
+        // The label gives way before the frame does: in a button squeezed by
+        // its row (a half-width sidebar action, a long translation) it ends
+        // in an ellipsis instead of spilling past the edge; the icon stays.
         el.children(leading)
-            .children(self.label.map(|label| div().child(label)))
+            .children(self.label.map(|label| div().min_w_0().truncate().child(label)))
     }
 
     /// The button acting on a click (press and release on the button).

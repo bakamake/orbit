@@ -524,8 +524,6 @@ pub struct UiPrefs {
     pub editor_font_size: f32,
     /// Global spacing multiplier, percent ("Spacing Density").
     pub spacing_density: u32,
-    /// Extra rounding in pixels for shared rectangular component shapes.
-    pub corner_rounding: u32,
     /// How motion is decided. `Reduced` and `Full` are the user's own answer;
     /// `System` follows the OS. Every surface reads the resolved value through
     /// [`Theme::reduce_motion`], never this field.
@@ -543,8 +541,6 @@ pub const DEFAULT_UI_FONT_SIZE: f32 = 14.;
 pub const FONT_SIZES: [f32; 8] = [11., 12., 13., 14., 15., 16., 18., 20.];
 /// Selectable spacing densities, percent.
 pub const SPACING_DENSITIES: [u32; 9] = [80, 85, 90, 95, 100, 105, 110, 115, 120];
-/// Maximum additional rounding for shared component corners, in pixels.
-pub const MAX_CORNER_ROUNDING: u32 = 4;
 
 impl Default for UiPrefs {
     fn default() -> Self {
@@ -554,7 +550,6 @@ impl Default for UiPrefs {
             terminal_font_size: 13.,
             editor_font_size: 13.,
             spacing_density: 100,
-            corner_rounding: 0,
             motion: MotionPreference::System,
             composer_send_mode: crate::composer_send::SendMode::default(),
             close_behavior: crate::tray::CloseBehavior::platform_default(),
@@ -633,11 +628,6 @@ impl UiPrefs {
                 prefs.spacing_density = density;
             }
         }
-        if let Some(rounding) = value.get("corner_rounding").and_then(Value::as_u64) {
-            if rounding <= MAX_CORNER_ROUNDING as u64 {
-                prefs.corner_rounding = rounding as u32;
-            }
-        }
         if let Some(motion) = value
             .get("motion")
             .and_then(Value::as_str)
@@ -685,7 +675,6 @@ impl UiPrefs {
             "terminal_font_size": self.terminal_font_size,
             "editor_font_size": self.editor_font_size,
             "spacing_density": self.spacing_density,
-            "corner_rounding": self.corner_rounding,
             "motion": self.motion.as_str(),
             // Kept for one release so a downgrade keeps the choice: the older
             // build reads this bool and ORs the OS read exactly as it used to.
@@ -3127,24 +3116,15 @@ mod tests {
     }
 
     #[test]
-    fn corner_rounding_round_trips_and_rejects_invalid_values() {
-        for rounding in 0..=MAX_CORNER_ROUNDING {
-            let prefs = UiPrefs {
-                corner_rounding: rounding,
-                ..UiPrefs::default()
-            };
-            assert_eq!(
-                UiPrefs::from_value(&prefs.to_value()).corner_rounding,
-                rounding
-            );
-        }
-        for value in [
-            serde_json::json!({}),
-            serde_json::json!({"corner_rounding": 5}),
-            serde_json::json!({"corner_rounding": -1}),
-        ] {
-            assert_eq!(UiPrefs::from_value(&value).corner_rounding, 0);
-        }
+    fn a_saved_corner_rounding_is_ignored_and_dropped() {
+        // The setting was removed; a prefs file written by an older build
+        // still loads, and the next save no longer carries the key.
+        let prefs = UiPrefs::from_value(&serde_json::json!({
+            "corner_rounding": 4,
+            "spacing_density": 110,
+        }));
+        assert_eq!(prefs.spacing_density, 110, "the rest of the file still loads");
+        assert!(prefs.to_value().get("corner_rounding").is_none());
     }
 
     #[test]
