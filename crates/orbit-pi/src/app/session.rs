@@ -72,8 +72,9 @@ const QUOTA_POPOVER_MAX_H: f32 = 460.;
 /// How much a hidden provider card is dimmed inside the popover's "Hidden"
 /// group: present and readable, but visibly out of the active list.
 const HIDDEN_CARD_DIM: f32 = 0.6;
-/// The session-details dock's card width, and the gutter between it and the
-/// chat column (the Explorer's dock uses the same 12px gutter).
+/// The session-details dock's card width, and the horizontal room its card
+/// gutters take: [`panel::gutter`] beside the chat column and again at the
+/// window's right edge (6px each at the default density), like the Explorer.
 pub(super) const SESSION_DETAILS_W: f32 = 320.;
 pub(super) const SESSION_DETAILS_GUTTER: f32 = 12.;
 /// The details card's header row, matching the Explorer's header height.
@@ -2770,15 +2771,19 @@ impl OrbitApp {
             .child(div().flex_none().h(DynamicSpacing::Base08.px(&theme)));
 
         // The dock reads as a rounded card beside the chat, like the Explorer:
-        // a 12px gutter on the left, then a flat surface with a hairline —
-        // glass over a full-window wallpaper, like the pages.
+        // the card gutter beside the chat, at the window's right edge and at
+        // its bottom, then a flat surface with a hairline — glass over a
+        // full-window wallpaper, like the pages.
+        let gutter = crate::theme::tokens::panel::gutter(&theme);
         div()
             .id("session-details-panel")
             .debug_selector(|| "session-details-panel".into())
             .flex_none()
             .w(px(SESSION_DETAILS_GUTTER + SESSION_DETAILS_W))
             .h_full()
-            .pl(px(SESSION_DETAILS_GUTTER))
+            .pl(gutter)
+            .pr(gutter)
+            .pb(gutter)
             .flex()
             .flex_col()
             .min_h_0()

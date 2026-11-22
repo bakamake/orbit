@@ -2836,6 +2836,9 @@ pub(crate) fn dock_shell(
     theme: Theme,
     body: AnyElement,
 ) -> gpui::Stateful<gpui::Div> {
+    // The dock is the row's last card: the card gutter beside its neighbour,
+    // at the window's right edge and at its bottom edge.
+    let gutter = crate::theme::tokens::panel::gutter(&theme);
     div()
         .id(id)
         .debug_selector(move || id.to_string())
@@ -2843,7 +2846,9 @@ pub(crate) fn dock_shell(
         .flex_none()
         .w(width)
         .h_full()
-        .pl(DynamicSpacing::Base12.px(&theme))
+        .pl(gutter)
+        .pr(gutter)
+        .pb(gutter)
         .flex()
         .flex_col()
         .min_h_0()
@@ -2857,10 +2862,10 @@ pub(crate) fn dock_shell(
             .absolute()
             .top_0()
             .bottom_0()
-            // Sit on the card's left border (the 12px gutter, minus
-            // half the handle width), not the panel's outer edge, so
-            // the edge users see is the edge they can grab.
-            .left(px(9.))
+            // Sit on the card's left border (the gutter, minus half the
+            // handle width), not the panel's outer edge, so the edge
+            // users see is the edge they can grab.
+            .left(gutter - px(3.))
             .w(px(6.))
             .on_drag(SidePaneResize, |_, _, _, cx| cx.new(|_| DragGhost)),
         )

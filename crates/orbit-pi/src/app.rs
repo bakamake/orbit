@@ -739,11 +739,16 @@ pub struct OrbitApp {
     /// opens): the activation observer that gates notifications, and the
     /// window-closed observer that clears that gate.
     _window_watchers: Vec<Subscription>,
-    /// The main window's last frame (#131), written to `window.json` on a
-    /// debounce, on close and on quit. `None` until a window registers.
+    /// The main window's last *settled* frame (#131): one that held still for
+    /// the debounce. It is what `window.json` holds, and the only frame a
+    /// zoom may take as its restore frame. `None` until a window registers.
     window_state: Option<crate::window_state::Saved>,
-    /// The pending debounced write of `window_state`; replacing it cancels
-    /// the previous one.
+    /// The newest frame seen, not yet settled. A zoom or Fill animates, and
+    /// its in-between frames land here so they never become the restore
+    /// frame of the maximized state they lead to.
+    window_state_pending: Option<crate::window_state::Saved>,
+    /// The debounce that settles `window_state_pending` and writes it;
+    /// replacing it cancels the previous one.
     window_state_save: Option<gpui::Task<()>>,
     /// Keeps the bounds, close and quit observers behind `window_state`.
     _window_state_watchers: Vec<Subscription>,
@@ -2606,6 +2611,7 @@ impl OrbitApp {
             activate_window_pending: false,
             _window_watchers: Vec::new(),
             window_state: None,
+            window_state_pending: None,
             window_state_save: None,
             _window_state_watchers: Vec::new(),
             session_history: Vec::new(),
@@ -3136,6 +3142,11 @@ impl OrbitApp {
                 .display(cx)
                 .and_then(|d| d.uuid().ok())
                 .map(|uuid| uuid.to_string());
+            // The restore frame comes from the settled state, never from a
+            // frame mid-animation: zooming passes through near-full frames
+            // that report as windowed, and keeping one of those would
+            // reopen the window un-zoomable (macOS treats a window already
+            // at the zoomed size as zoomed, so `zoom:` shrinks it instead).
             let state = crate::window_state::Saved::observe(
                 app.window_state.as_ref(),
                 window.window_bounds(),
@@ -3143,13 +3154,31 @@ impl OrbitApp {
                 window.is_fullscreen(),
                 display,
             );
-            if app.window_state.as_ref() == Some(&state) {
+            let latest = app
+                .window_state_pending
+                .as_ref()
+                .or(app.window_state.as_ref());
+            if latest == Some(&state) {
                 return;
             }
-            app.window_state = Some(state.clone());
-            app.window_state_save = Some(cx.background_spawn(async move {
-                gpui::Timer::after(std::time::Duration::from_millis(500)).await;
-                state.persist();
+            app.window_state_pending = Some(state.clone());
+            app.window_state_save = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(500))
+                    .await;
+                let settled = this
+                    .update(cx, |app, _| {
+                        let state = app.window_state_pending.take()?;
+                        app.window_state = Some(state.clone());
+                        Some(state)
+                    })
+                    .ok()
+                    .flatten();
+                if let Some(state) = settled {
+                    cx.background_executor()
+                        .spawn(async move { state.persist() })
+                        .await;
+                }
             }));
         });
         let this = cx.weak_entity();
@@ -3166,6 +3195,9 @@ impl OrbitApp {
     /// Write the pending window frame now instead of after the debounce.
     fn flush_window_state(&mut self) {
         if self.window_state_save.take().is_some() {
+            if let Some(state) = self.window_state_pending.take() {
+                self.window_state = Some(state);
+            }
             if let Some(state) = &self.window_state {
                 state.persist();
             }

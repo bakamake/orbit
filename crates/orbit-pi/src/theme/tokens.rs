@@ -432,6 +432,15 @@ pub mod panel {
 
     /// Standard panel/card corner: 12px, shared by all palettes.
     pub const RADIUS: Radius = Radius::XLarge;
+
+    /// The air around a workbench card (a page, Explorer, Review, session
+    /// details): between two cards, from the sidebar, and from the window's
+    /// right and bottom edges. One value on every side keeps the cards'
+    /// corners clear of the window's own rounded corner, so neither curve
+    /// clips the other.
+    pub fn gutter(theme: &Theme) -> Pixels {
+        DynamicSpacing::Base06.px(theme)
+    }
 }
 
 /// `List` and `ListSeparator` metrics.

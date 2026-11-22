@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Maximized window reopens maximized.** A window you closed while
+  maximized could reopen a little short of the screen and no longer
+  maximized. Orbit now waits for the maximize animation to finish before
+  remembering the window's size, so the size to restore to is the one you
+  had before maximizing.
+- **Tighter workbench cards with clean corners.** The Files, Git, Usage and
+  Worktrees pages and the Explorer, Review and Session details docks now sit
+  6px apart (down from 12px), and keep the same 6px from the window's right
+  and bottom edges instead of running into the window's own rounded corner.
+  A file or page no longer paints its last lines through the card's bottom
+  corners and edge, and every card's outline stays visible at all four
+  corners.
+- **Even file tab header.** An open file's tab now sits centred in its strip
+  at every UI size, the same distance from the top and left of the card, and
+  the close button matches the tab's height. The file name, the path below it
+  and the size/lines/Saved details now line up on one left and one right edge.
 - **New Session details icon.** The top-bar button that opens Session details
   now shows a list icon instead of the info "i", which stays in use for
   notices and About.

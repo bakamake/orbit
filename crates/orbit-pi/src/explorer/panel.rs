@@ -1721,6 +1721,10 @@ impl Render for ProjectPanel {
         // The filter is read here; the observer marks rows dirty on change.
         self.refresh_rows(cx);
         let theme = *theme::get(cx);
+        // The dock is the row's last card, so it keeps the card gutter on
+        // every open side: beside its neighbour, at the window's right edge
+        // and at its bottom edge.
+        let gutter = crate::theme::tokens::panel::gutter(&theme);
         div()
             .id("project-panel")
             .debug_selector(|| "project-panel".into())
@@ -1729,7 +1733,9 @@ impl Render for ProjectPanel {
             .w(self.width)
             .min_w(px(PANEL_MIN_W))
             .h_full()
-            .pl(DynamicSpacing::Base12.px(&theme))
+            .pl(gutter)
+            .pr(gutter)
+            .pb(gutter)
             .flex()
             .flex_col()
             .min_h_0()
@@ -1743,10 +1749,10 @@ impl Render for ProjectPanel {
                 .absolute()
                 .top_0()
                 .bottom_0()
-                // Sit on the card's left border (the 12px gutter, minus
-                // half the handle width), not the panel's outer edge, so
-                // the edge users see is the edge they can grab.
-                .left(px(9.))
+                // Sit on the card's left border (the gutter, minus half the
+                // handle width), not the panel's outer edge, so the edge
+                // users see is the edge they can grab.
+                .left(gutter - px(3.))
                 .w(px(6.))
                 .on_drag(ExplorerResize, |_, _, _, cx| cx.new(|_| ExplorerDragGhost)),
             )

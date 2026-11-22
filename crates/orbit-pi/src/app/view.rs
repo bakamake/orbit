@@ -122,11 +122,13 @@ pub(super) fn titlebar_controls_left(sidebar_visible: bool, sidebar_width: f32) 
 }
 
 /// Wrap a feature page (Files / Git / Usage) in the card the main column shows
-/// below the shared top bar: a gap from the sidebar on the left, rounded
-/// corners, a hairline, and a clipped body. Keeps the top bar and the session
-/// context in place instead of swapping the whole column for an edge-to-edge
-/// page.
-fn feature_card(theme: Theme, body: AnyElement) -> AnyElement {
+/// below the shared top bar: the card gutter from the sidebar and the window's
+/// bottom edge (and its right edge when no dock follows — a dock brings its
+/// own), rounded corners, a hairline, and a clipped body. Keeps the top bar
+/// and the session context in place instead of swapping the whole column for
+/// an edge-to-edge page.
+fn feature_card(theme: Theme, body: AnyElement, trailing_gutter: bool) -> AnyElement {
+    let gutter = panel::gutter(&theme);
     div()
         .flex_1()
         .min_h_0()
@@ -135,7 +137,9 @@ fn feature_card(theme: Theme, body: AnyElement) -> AnyElement {
         // shrink and pushes the right dock past the window edge.
         .min_w_0()
         .w_full()
-        .pl(DynamicSpacing::Base12.px(&theme))
+        .pl(gutter)
+        .pb(gutter)
+        .when(trailing_gutter, |el| el.pr(gutter))
         .child(
             // Over a full-window wallpaper the card is glass and the page
             // inside paints `page_canvas` (clear), so the frost shows; only
@@ -145,7 +149,22 @@ fn feature_card(theme: Theme, body: AnyElement) -> AnyElement {
                 .flex()
                 .flex_col()
                 .overflow_hidden()
-                .page_card(&theme, body),
+                .page_card(
+                    &theme,
+                    // The page ends one inner radius above the card's edge so
+                    // a scrolled buffer never paints through the bottom arcs.
+                    // The band takes the page's own canvas, rounded to the
+                    // card, so it reads as the page and not as a footer.
+                    div()
+                        .size_full()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .rounded(crate::ui::style::surface::inspector_inner_radius(&theme))
+                        .bg(theme.page_canvas())
+                        .pb(crate::ui::style::surface::card_corner_clearance(&theme))
+                        .child(body),
+                ),
         )
         .into_any_element()
 }
@@ -504,6 +523,9 @@ impl Render for OrbitApp {
         // the Explorer; opening any one of them closes the others.
         let details_visible = self.session_details_visible(cx);
         let details_width = self.session_details_width(cx);
+        // A dock is always the row's last card and keeps the window's right
+        // gutter itself; a page card beside it must not add a second one.
+        let dock_visible = explorer_visible || pane_visible || details_visible;
         // The pane's ceiling is the window minus the sidebar and the Explorer;
         // Full width expands to it and collapses the chat column. The Explorer
         // is closed whenever the pane opens, so this is usually the sidebar's
@@ -1691,12 +1713,16 @@ impl Render for OrbitApp {
                             .child(if pane_full {
                                 div().into_any_element()
                             } else if feature_open {
-                                feature_card(theme, body)
+                                feature_card(theme, body, !dock_visible)
                             } else if terminal_full {
                                 // The expanded shell owns the page the way Git
                                 // and Usage do: the chat is skipped and the
                                 // panel fills the card under the top bar.
-                                feature_card(theme, self.terminal_panel.clone().into_any_element())
+                                feature_card(
+                                    theme,
+                                    self.terminal_panel.clone().into_any_element(),
+                                    !dock_visible,
+                                )
                             } else {
                                 body
                             })
@@ -4193,7 +4219,7 @@ impl OrbitApp {
             &theme,
             explorer_visible,
             icon(
-                "icons/folder-panel.svg",
+                "icons/folder.svg",
                 ButtonSize::Medium.icon_size().px(&theme),
                 if explorer_visible {
                     theme.text_primary

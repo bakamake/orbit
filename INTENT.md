@@ -132,18 +132,25 @@ hook re-arms a live session with no restart.
 
 **Residual:** this is a guard, not a sandbox (pi ships none).
 
-### D9 — Localization: `en.yml` is the only hand-edited locale
+### D9 — Localization: `en.yml` owns the keys, each locale file owns its translations
 **Choice:** all user-facing copy goes through the crate-root `tr!` / `tr_cow!` macros
-(`crates/orbit-pi/src/i18n.rs`). `locales/en.yml` is the source of truth; the other nine locale
-files are generated from the `scripts/i18n_glossary*.py` tables by `scripts/gen_locales.py`, and
-`cargo test -p orbit-pi i18n` guards completeness. Ships English, 简体中文, 日本語, 한국어,
+(`crates/orbit-pi/src/i18n.rs`). `locales/en.yml` is the source of truth for keys, their order and
+placeholders; each of the other nine locale files is hand-edited and holds that language's
+translations. `scripts/check_i18n.py` fails on a locale that is missing a key, keeps a stale one,
+drifts from `en.yml`'s order or drops a placeholder, and `--sync` brings every locale in line
+(new keys arrive in English, to be translated); `cargo test -p orbit-pi i18n` guards completeness.
+*Revised:* translations used to live in sixty `scripts/i18n_glossary*.py` tables keyed by the
+English text and were generated into the locale files. That stored every translation twice, let a
+later table silently override an earlier one (91 conflicts), and tied one translation to every key
+sharing an English string; the locale files are now the only copy. Ships English, 简体中文, 日本語, 한국어,
 Español, Français, Deutsch, Português do Brasil, Русский, Italiano — plus `System`, which walks
 the OS preferred-language list and picks the first shipped language.
-**Rationale:** ten hand-maintained locale files drift; generated files with an English fallback
-and a completeness test keep them honest without blocking releases. Long-lived fields resolve
+**Rationale:** ten hand-maintained locale files drift unless something checks them; a guard that
+compares each file to `en.yml` (keys, order, placeholders) plus an untranslated-string baseline
+keeps them honest without blocking releases, and with one copy of each translation. Long-lived fields resolve
 placeholders from keys at paint time, so a language change is live (including the native menu
-bar) without rebuilding them. **Consequence:** new copy adds an `en.yml` key and a glossary
-entry — hard-coded English in a render path is a bug.
+bar) without rebuilding them. **Consequence:** new copy adds an `en.yml` key, a `--sync`, and a
+translation in each locale file — hard-coded English in a render path is a bug.
 
 ### D10 — Provider quota: a bundled extension bridge over pi's own credentials
 **Choice:** account usage (quota / balance / spend) is read by the bundled
