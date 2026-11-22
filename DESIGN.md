@@ -652,6 +652,13 @@ Every component below has **one owner** in `crates/orbit-pi/src/ui/`
   the affordance, with no gradient and no lift shadow. Segmented controls use
   the same `raised` face. Ghost and disabled buttons stay flat too.
 - **Ghost:** no fill until hover (`surface_hover`); used for every icon action in a header.
+- **On glass:** a faced control (Secondary, Outline and Danger buttons, outlined and file
+  chips, segmented groups, raised tiles, text fields) resolves its face through
+  `Theme::control_face` / `control_inset`: the palette step on an opaque surface, and on
+  glass an `overlay` ink face (a recessed one: the face at `overlay_strong` alpha) under
+  its hairline, so the frost shows through. Hover, open and selected are then
+  `hover_wash` / `pressed_wash` / `selected_wash`. Primary, accent and error fills stay
+  solid: they carry an action and their contrast floor.
 - **Disabled:** `overlay` fill with `text_disabled` content; never opacity-faded color.
 
 ### Chips
@@ -677,8 +684,8 @@ Every component below has **one owner** in `crates/orbit-pi/src/ui/`
 - **Style:** 1px hairline, fixed 12px radius on the chat composer
   (`input::composer_radius`), 9px before preferences on inline fields (`input::RADIUS`).
   The composer uses `surface_secondary`, with contrast-adjusted glass when available.
-- **Focus:** other fields step their border to `focus_ring` (1px). The composer keeps
-  its resting hairline when focused; its caret indicates text focus.
+- **Focus:** no field draws a focus ring; every field, the composer included, keeps its
+  resting hairline when focused, and the caret indicates text focus.
 - **Placeholder:** `text_muted` — always a real prompt ("Search sessions…"), never a label.
 - **Tokens:** a leading `/command` and any `@file` mention paint inline in their token
   colors while typing; the caret, selection, and wrapping are unaffected (paint only).
@@ -762,16 +769,16 @@ Do not give two competing actions the same visual weight.
 
 ### Focus
 
-Focus is a first-class state, not a stronger hover state. It is one token, drawn one way.
+**Orbit paints no focus ring** (a product decision). Keyboard focus still moves —
+Tab, arrows, Enter and Space work everywhere they did — but no control, row or
+field draws a ring, a border change or a fill for it.
 
 - Pointer hover fills `surface_hover`.
-- Keyboard focus draws a **1px border in `focus_ring`** (`BORDER_WIDTH`), never a
-  fill and never an outline that changes layout. On a filled control the border sits
-  on the control's own edge; on a row it sits on the row's rounded rect.
-- Focus is never signalled by accent color alone — the ring is its own role, and it is
-  asserted at ≥3:1 against `background` and `surface_elevated` for every palette.
-- Focused selection must remain distinguishable from an unfocused selection: the
-  selected fill stays, the ring is added on top.
+- Controls that used to show a ring keep their 1px edge reserved and transparent
+  (`focus_ring_reserved`), so geometry is identical focused or not.
+- The `focus_ring` palette role remains defined (and contrast-tested) but no component
+  paints it. Reintroducing a ring is a deliberate design change, not a fix.
+- Selection still shows through its own fill (`surface_selected` / `selected_wash`).
 - After dismissing a popover or modal, restore focus to the control that opened it.
 - Opening a contextual panel must not unexpectedly steal focus from the active editor
   or composer.
@@ -803,7 +810,6 @@ the call site. Existing adoption is still in progress:
 | `Hover` | `surface_hover` | role's own | `text_primary` | `text_primary` |
 | `Pressed` | `surface_active` | role's own | `text_primary` | `text_primary` |
 | `Selected` | `surface_selected` | role's own | `selection_fg` | `selection_fg` |
-| `Focused` | none | `focus_ring` | `text_primary` | `text_primary` |
 | `Disabled` | `overlay` | `border_subtle` | `text_disabled` | `text_disabled` |
 
 The Hover, Pressed and Selected fills are read through `Theme::hover_wash()`,
@@ -1497,9 +1503,8 @@ The file tree is a navigation instrument.
 - Prefer indentation and whitespace over nested cards.
 - A file open in the viewer uses `surface_selected`; during inline rename the
   row uses `surface_active` for editing. An unselected keyboard-cursor row uses
-  `overlay`, and an unselected, non-cursor row gets hover treatment. When the tree
-  has focus and its cursor is on the open file, a focus ring overlays the selected
-  fill without changing row layout; it is omitted during inline rename.
+  `overlay`, and an unselected, non-cursor row gets hover treatment. No focus ring
+  is drawn on the tree.
 - Git status uses semantic indicators plus text/icon where necessary.
 - Hidden files remain controlled by an explicit setting.
 - Directory expansion should be keyboard accessible.
@@ -1641,7 +1646,7 @@ accounts for:
 
 - default (`Rest`)
 - hover (`Hover`)
-- focus (`Focused` — the 1px `focus_ring` border)
+- focus — not painted: Orbit draws no focus ring
 - active/pressed (`Pressed`)
 - selected (`Selected`)
 - disabled (`Disabled` — non-interactive, not faded)
@@ -1809,7 +1814,7 @@ them.
 | Type | 11 / 12 / 14 / 16px | `TextSize` |
 | Spacing | 1, 2, 3, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48px | `DynamicSpacing` |
 | Separators | 1px | `BORDER_WIDTH` |
-| Focus ring | 1px border | `BORDER_WIDTH` in `focus_ring` |
+| Focus ring | none painted | the 1px edge stays reserved, transparent |
 | Motion | 150 / 200 / 260ms | `Motion` |
 
 ### Verification

@@ -78,7 +78,6 @@ pub(crate) struct TreeRow {
     height: Pixels,
     state: TreeRowState,
     guides: bool,
-    focus_ring: bool,
     trailing: Vec<AnyElement>,
 }
 
@@ -98,7 +97,6 @@ impl TreeRow {
             height: px(28.),
             state: TreeRowState::Rest,
             guides: false,
-            focus_ring: false,
             trailing: Vec::new(),
         }
     }
@@ -120,12 +118,6 @@ impl TreeRow {
         self
     }
 
-    /// Ring the row (the selected row while the tree has keyboard focus),
-    /// without changing its layout or its fill.
-    pub(crate) fn focus_ring(mut self, focus_ring: bool) -> Self {
-        self.focus_ring = focus_ring;
-        self
-    }
 
     /// An inline editor in place of the name (a rename `ComposerInput`).
     /// Trailing marks are dropped while it shows.
@@ -214,11 +206,13 @@ impl TreeRow {
             Some(editor) => row.child(div().flex().flex_1().min_w_0().child(editor)),
             None => row
                 .child(
+                    // Ellipsized, not clipped: a cut-off name shows that it
+                    // is cut off. The caller supplies the way to the full
+                    // name (the Explorer's row tooltip).
                     div()
                         .min_w_0()
                         .flex_1()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
+                        .truncate()
                         .text_size(TextSize::Small.px(theme))
                         .when_dir(directory, |el| el.font_weight(FontWeight::MEDIUM))
                         .text_color(name_ink)
@@ -227,17 +221,6 @@ impl TreeRow {
                 .children(self.trailing),
         };
 
-        if self.focus_ring {
-            row = row.child(
-                div()
-                    .debug_selector(|| "tree-row-focus-ring".to_string())
-                    .absolute()
-                    .inset_0()
-                    .rounded(Radius::Medium.px(theme))
-                    .border_1()
-                    .border_color(theme.focus_ring),
-            );
-        }
         row
     }
 }

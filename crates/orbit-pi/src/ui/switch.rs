@@ -74,7 +74,6 @@ impl RenderOnce for Switch {
             )
             .read(cx)
             .clone();
-        let focused = focus.is_focused(window);
         let geometry = SwitchGeometry::new(&theme);
         let selector = id.clone();
         let track = div()
@@ -90,11 +89,7 @@ impl RenderOnce for Switch {
             // from the outer edge, so the padding gives that pixel back.
             .p(geometry.inset - px(1.))
             .border_1()
-            .border_color(if focused {
-                theme.focus_ring
-            } else {
-                gpui::transparent_black()
-            })
+            .border_color(gpui::transparent_black())
             .flex()
             .items_center()
             .cursor_pointer()

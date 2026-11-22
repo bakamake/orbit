@@ -100,13 +100,13 @@ fn variant_treatment<E: Styled + StatefulInteractiveElement>(
         ButtonVariant::Secondary => press(
             el.border_1()
                 .border_color(theme.hairline())
-                .raised(theme.surface_elevated, theme)
+                .raised(theme.control_face(theme.surface_elevated), theme)
                 .text_color(theme.text_secondary),
         ),
         ButtonVariant::Outline => press(
             el.border_1()
                 .border_color(theme.hairline())
-                .raised(theme.surface_elevated, theme)
+                .raised(theme.control_face(theme.surface_elevated), theme)
                 .text_color(theme.text_primary),
         ),
         ButtonVariant::Tinted => el
@@ -117,7 +117,7 @@ fn variant_treatment<E: Styled + StatefulInteractiveElement>(
         ButtonVariant::Danger => press(
             el.border_1()
                 .border_color(theme.hairline())
-                .raised(theme.surface_elevated, theme)
+                .raised(theme.control_face(theme.surface_elevated), theme)
                 .text_color(theme.error),
         ),
         ButtonVariant::Ghost => el
@@ -160,7 +160,7 @@ impl ButtonVariant {
         match self {
             Self::Primary => Some(Hover::fill(theme.action, theme.action_hover)),
             Self::Secondary | Self::Outline => Some(Hover::fill(
-                theme.surface_elevated,
+                theme.control_face(theme.surface_elevated),
                 theme.face_hover(theme.surface_elevated),
             )),
             Self::Ghost => Some(Hover::wash(theme)),
@@ -850,16 +850,16 @@ impl ButtonGroup {
 
     fn chosen_fill(&self, theme: &Theme) -> Hsla {
         match self.fill {
-            SegmentFill::Selected => theme.surface_selected,
-            SegmentFill::Active => theme.surface_active,
+            SegmentFill::Selected => theme.selected_wash(),
+            SegmentFill::Active => theme.pressed_wash(),
         }
     }
 
     fn resting_fill(&self, theme: &Theme) -> Hsla {
         if self.inset {
-            theme.background
+            theme.control_inset(theme.background)
         } else {
-            theme.surface_elevated
+            theme.control_face(theme.surface_elevated)
         }
     }
 
@@ -909,7 +909,7 @@ impl ButtonGroup {
                 if segment.selected { 1.0 } else { 0.0 },
                 move |el, hover, selected| {
                     let fill = crate::motion::blend(
-                        crate::motion::blend(resting, theme.surface_hover, hover),
+                        crate::motion::blend(resting, theme.face_hover(resting), hover),
                         chosen,
                         selected,
                     );

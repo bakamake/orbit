@@ -48,7 +48,7 @@ use crate::ui::button::{Button, ButtonVariant};
 use crate::agent_call_display::AgentCallDisplay;
 use crate::app::OrbitApp;
 use crate::context_meter::{format_tokens, hit_percent_label};
-use crate::highlight::{self, Token};
+use crate::highlight::{self, Token, TokenClass};
 use crate::message_scroller::{self, MessageScrollerState};
 use crate::motion::Hover;
 use crate::shimmer::ShimmerText;
@@ -74,12 +74,27 @@ use crate::ui::banner::{Banner, BannerTone};
 /// inspector glass wherever it frosts — the wallpaper's card tint over a
 /// picture, the contrast-floored tint over the bare workbench in dark
 /// palettes — and the opaque `overlay` plane everywhere else, so text never
-/// sits over an unblurred backdrop.
+/// sits over an unblurred backdrop. On a full-window wallpaper the chat column
+/// is already glass, so the card adds only the frost and a light lift
+/// ([`Theme::on_page_glass_fill`]) and reads as the sidebar's material.
 fn frosted_transcript_fill(theme: Theme) -> Hsla {
+    if let Some(fill) = theme.on_page_glass_fill(theme.surface_secondary) {
+        return fill;
+    }
     match theme.floating_glass_sigma() {
         Some(_) => theme.inspector_fill(theme.surface_secondary),
         None => theme.overlay,
     }
+}
+
+/// The code well inside a transcript card (a tool call's arguments and
+/// output): [`Theme::on_page_glass_well`] on a full-window wallpaper, so an
+/// open tool card is the same glass as every other card, and the
+/// contrast-floored [`Theme::inspector_well`] everywhere else.
+fn transcript_well_fill(theme: Theme) -> Hsla {
+    theme
+        .on_page_glass_well(theme.code_bg)
+        .unwrap_or_else(|| theme.inspector_well(theme.code_bg))
 }
 
 /// Opens the changed-files Review in the side pane (see `sidepane.rs`) —
@@ -3427,8 +3442,6 @@ fn render_activity_group(
                     .min_w_0()
                     .max_w_full()
                     .child(chip),
-                radius: crate::theme::tokens::button::radius(ButtonSize::Default).px(&theme),
-                theme,
                 toggle,
             }
         });
@@ -3749,8 +3762,6 @@ fn render_thinking_body(
                 SharedString::from(format!("thought-toggle-focus-{}-{}", key.0, key.1)),
                 toggle,
             )),
-            inspector_inner_radius(&theme),
-            theme,
         ));
     if !collapsed {
         card = card.child(
@@ -3826,7 +3837,9 @@ fn render_thinking_body(
                     let runs = highlight_runs(base_runs, range, selection_color(theme));
                     SelectableText::new(
                         body_key,
-                        StyledText::new(text.clone()).with_runs(runs),
+                        StyledText::new(text.clone())
+                            .with_runs(runs)
+                            .with_background_chips(inline_code_chip(&theme)),
                         text,
                         Vec::new(),
                         scope,
@@ -4143,8 +4156,8 @@ type SubagentRowToggleFn = Rc<dyn Fn(&mut App)>;
 type SubagentRowCloseFn = Rc<dyn Fn(&mut App) -> bool>;
 
 /// A delegation card's child row as a keyboard stop (§9.8): Tab reaches it,
-/// Enter or Space opens that child's log, Escape closes it, and a focused row
-/// wears the 1px ring over its fill without moving a pixel of layout.
+/// Enter or Space opens that child's log, and Escape closes it. Orbit paints no
+/// focus ring, so a focused row looks like any other.
 ///
 /// A pointer click opens the log but leaves keyboard focus where it was, so
 /// clicking a card mid-turn never pulls the caret out of the composer. The
@@ -4154,12 +4167,6 @@ type SubagentRowCloseFn = Rc<dyn Fn(&mut App) -> bool>;
 struct SubagentRowKeys {
     focus_id: SharedString,
     row: gpui::Stateful<gpui::Div>,
-    /// The card's first row shares its rounded top edge.
-    first: bool,
-    /// The card's last row shares its rounded bottom edge when nothing
-    /// follows it.
-    last: bool,
-    theme: Theme,
     toggle: SubagentRowToggleFn,
     close: SubagentRowCloseFn,
 }
@@ -4169,9 +4176,6 @@ impl RenderOnce for SubagentRowKeys {
         let SubagentRowKeys {
             focus_id,
             row,
-            first,
-            last,
-            theme,
             toggle,
             close,
         } = self;
@@ -4181,8 +4185,6 @@ impl RenderOnce for SubagentRowKeys {
             })
             .read(cx)
             .clone();
-        let focused = focus.is_focused(window);
-        let radius = panel::RADIUS.px(&theme);
         row.track_focus(&focus)
             .key_context("SubagentRow")
             // A click is pointer work: keep focus where the reader left it.
@@ -4196,18 +4198,6 @@ impl RenderOnce for SubagentRowKeys {
                 }
             })
             .relative()
-            .when(focused, |row| {
-                row.child(
-                    div()
-                        .debug_selector(|| "subagent-row-focus-ring".to_string())
-                        .absolute()
-                        .inset_0()
-                        .when(first, |ring| ring.rounded_t(radius))
-                        .when(last, |ring| ring.rounded_b(radius))
-                        .border_1()
-                        .border_color(theme.focus_ring),
-                )
-            })
     }
 }
 
@@ -4216,8 +4206,8 @@ type ActivityToggleFn = Rc<dyn Fn(&mut App)>;
 
 /// A transcript activity disclosure as a keyboard stop — an activity group's
 /// summary line, a tool row with detail, a thought row: Tab reaches it, Enter
-/// or Space folds or unfolds it through the same `toggle` a click runs, and a
-/// focused one wears the 1px `focus_ring` over itself without moving layout.
+/// or Space folds or unfolds it through the same `toggle` a click runs. No
+/// focus ring is painted.
 ///
 /// Same contract as [`SubagentRowKeys`]: a pointer click toggles but leaves
 /// keyboard focus where it was (the composer keeps its caret), and the handle
@@ -4227,9 +4217,6 @@ type ActivityToggleFn = Rc<dyn Fn(&mut App)>;
 struct ActivityToggleKeys {
     focus_id: SharedString,
     row: gpui::Stateful<gpui::Div>,
-    /// The ring's corner radius, matching the control it outlines.
-    radius: Pixels,
-    theme: Theme,
     toggle: ActivityToggleFn,
 }
 
@@ -4238,8 +4225,6 @@ impl RenderOnce for ActivityToggleKeys {
         let ActivityToggleKeys {
             focus_id,
             row,
-            radius,
-            theme,
             toggle,
         } = self;
         let focus = window
@@ -4248,24 +4233,12 @@ impl RenderOnce for ActivityToggleKeys {
             })
             .read(cx)
             .clone();
-        let focused = focus.is_focused(window);
         row.track_focus(&focus)
             .key_context("ActivityToggle")
             // A click is pointer work: keep focus where the reader left it.
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .on_action(move |_: &crate::ActivityToggle, _, cx| toggle(cx))
             .relative()
-            .when(focused, |row| {
-                row.child(
-                    div()
-                        .debug_selector(move || format!("{focus_id}-ring"))
-                        .absolute()
-                        .inset_0()
-                        .rounded(radius)
-                        .border_1()
-                        .border_color(theme.focus_ring),
-                )
-            })
     }
 }
 
@@ -4274,15 +4247,11 @@ impl RenderOnce for ActivityToggleKeys {
 fn activity_keys(
     row: gpui::Stateful<gpui::Div>,
     keys: Option<(SharedString, ActivityToggleFn)>,
-    radius: Pixels,
-    theme: Theme,
 ) -> AnyElement {
     match keys {
         Some((focus_id, toggle)) => ActivityToggleKeys {
             focus_id,
             row,
-            radius,
-            theme,
             toggle,
         }
         .into_any_element(),
@@ -4591,9 +4560,6 @@ fn render_subagent_card(
         card = card.child(SubagentRowKeys {
             focus_id: SharedString::from(format!("subagent-row-focus-{}-{}-{ix}", key.0, key.1)),
             row,
-            first: ix == 0,
-            last: rows_end_card && ix + 1 == children_len,
-            theme,
             toggle,
             close,
         });
@@ -5847,6 +5813,9 @@ fn render_activity_card(
     // the rounded border. The first and last children carry the card's own
     // radius instead.
     let detail_shown = tool_open && has_detail;
+    // An open command card reads its full command in the detail, so the
+    // header leaves its truncated preview out.
+    let command_in_detail = is_command && detail_shown;
     let header_is_only_child = !detail_shown && !tool.failed;
     let toggle: ActivityToggleFn = Rc::new({
         let scroller = scroller.clone();
@@ -5913,7 +5882,11 @@ fn render_activity_card(
                         .text_color(theme.text_secondary)
                         .child(action),
                 )
-                .when(!detail.is_empty(), |row| {
+                // Open, a command card shows the full command as the first
+                // line of its detail; repeating a truncated copy in the
+                // header only doubled it. The spacer keeps the chevron put.
+                .when(command_in_detail, |row| row.child(div().flex_1().min_w_0()))
+                .when(!detail.is_empty() && !command_in_detail, |row| {
                     if is_command {
                         // Terminal preview: a muted prompt sigil then the
                         // command in the code face, in one settled ink. A
@@ -5922,6 +5895,9 @@ fn render_activity_card(
                         // across a long turn it outshouted the answer.
                         row.child(
                             div()
+                                .debug_selector(move || {
+                                    format!("tool-command-preview-{}-{}", key.0, key.1)
+                                })
                                 .flex_1()
                                 .min_w_0()
                                 .overflow_hidden()
@@ -6089,8 +6065,6 @@ fn render_activity_card(
                     toggle.clone(),
                 )
             }),
-            inspector_inner_radius(&theme),
-            theme,
         ));
     // A failed run carries its first error line right on the card — the
     // fact a user scanning the turn needs, without opening the detail.
@@ -6221,6 +6195,9 @@ fn render_tool_detail(
     // A text read is its file's lines: the path and range already sit in the
     // header, so the arguments JSON would only repeat them.
     let listing = read_listing(tool);
+    // A shell command's output is terminal text: one row per line, scrolled
+    // sideways rather than wrapped, with grep-style locations dimmed.
+    let command_output = tool_command(tool).is_some();
     let first = match tool_command(tool) {
         Some(command) => Some((
             tr!("transcript.command"),
@@ -6311,8 +6288,10 @@ fn render_tool_detail(
             .w_full()
             .min_w_0()
             // A recessed well, not a second faint layer of glass: the code
-            // face holds its contrast over any wallpaper or workbench.
-            .bg(theme.inspector_well(theme.code_bg))
+            // face holds its contrast over any wallpaper or workbench. On the
+            // page glass the column and the card already carry most of that
+            // coverage, so the well tops it up instead of stacking a slab.
+            .bg(transcript_well_fill(theme))
             .flex()
             .flex_col()
             // The surface is always the card's last child, so it carries the
@@ -6337,6 +6316,7 @@ fn render_tool_detail(
                 content,
                 lang,
                 prompt,
+                command_output && section == 1,
                 listing.clone().filter(|_| section == 1),
                 copied_sections.clone(),
                 hovered_sections.clone(),
@@ -6471,6 +6451,7 @@ fn render_detail_section(
     content: String,
     lang: Option<highlight::Lang>,
     prompt: bool,
+    command_output: bool,
     listing: Option<Rc<ReadListing>>,
     copied_sections: CopiedSections,
     hovered_sections: HoveredSections,
@@ -6483,7 +6464,9 @@ fn render_detail_section(
     // and its range), a line-number gutter, and the copy control floated in
     // the corner. Copy carries the lines as read, indentation included.
     let first_line = listing.as_ref().map(|listing| listing.first_line);
-    let bare = listing.is_some();
+    // The command is bare as well: its `$` prompt already says what it is,
+    // so a "Command" label row only spent a line above it.
+    let bare = listing.is_some() || prompt;
     let hover = hovered_sections
         .borrow()
         .get(&hover_key)
@@ -6757,7 +6740,14 @@ fn render_detail_section(
                     )
                 })
                 .child(render_detail_body(
-                    &content, visible, lang, first_line, key, section, theme,
+                    &content,
+                    visible,
+                    lang,
+                    first_line,
+                    command_output,
+                    key,
+                    section,
+                    theme,
                 )),
         );
     if foldable {
@@ -6825,16 +6815,38 @@ fn render_detail_section(
 /// blob wraps inside the card rather than forcing it wide. `visible` is the
 /// prefix slice actually painted (collapse preview / paint cap); token
 /// ranges index lines absolutely, and a prefix slice keeps them aligned.
+#[allow(clippy::too_many_arguments)]
 fn render_detail_body(
     content: &str,
     visible: &[&str],
     lang: Option<highlight::Lang>,
     first_line: Option<usize>,
+    command_output: bool,
     key: (usize, usize),
     section: u8,
     theme: Theme,
 ) -> AnyElement {
-    let tokens = lang.map(|lang| highlight::tokenize_cached(lang, content));
+    let tokens = match lang {
+        Some(lang) => Some(highlight::tokenize_cached(lang, content)),
+        // Plain command output: a `path:line:` location (grep, rg, compiler
+        // diagnostics) takes the comment ink, so the matched text leads.
+        None if command_output => Some(Rc::new(
+            visible
+                .iter()
+                .map(|line| {
+                    location_prefix_len(line)
+                        .map(|len| {
+                            vec![Token {
+                                range: 0..len,
+                                class: TokenClass::Comment,
+                            }]
+                        })
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>(),
+        )),
+        None => None,
+    };
     // A file listing numbers its lines from where the read started. The
     // gutter is as wide as the largest number painted, in the code face so
     // every digit is one width and the numbers right-align.
@@ -6842,14 +6854,11 @@ fn render_detail_body(
         let last = first + visible.len().saturating_sub(1);
         theme.term_px(8. * last.to_string().len() as f32)
     });
-    div()
-        .flex_1()
-        .min_w_0()
+    let column = div()
         .font_family(theme::code_font_family())
         .text_size(theme.term_px(13.))
         .line_height(theme.term_px(20.))
         .text_color(theme.code_text)
-        .whitespace_normal()
         .flex()
         .flex_col()
         .children(visible.iter().enumerate().map(move |(line_ix, line)| {
@@ -6889,8 +6898,32 @@ fn render_detail_body(
                     .child(div().flex_1().min_w_0().child(code)),
                 _ => div().w_full().min_w_0().child(code),
             }
-        }))
-        .into_any_element()
+        }));
+    if command_output {
+        // One row per output line, as a terminal prints it: a long line
+        // scrolls sideways instead of wrapping into a ragged block where its
+        // continuation lost the line's indentation.
+        let mut scroll = div()
+            .id(ElementId::NamedInteger(
+                "detail-output-scroll".into(),
+                ((key.0 as u64) << 34) | ((key.1 as u64) << 18) | ((section as u64) << 12),
+            ))
+            .flex_1()
+            .min_w_0()
+            .overflow_x_scroll()
+            .child(column.flex_none().whitespace_nowrap());
+        // Only a sideways gesture scrolls the output; a plain wheel keeps
+        // scrolling the transcript instead of being turned into a sideways
+        // move (gpui maps a vertical wheel onto the only scrolling axis).
+        scroll.style().restrict_scroll_to_axis = Some(true);
+        scroll.into_any_element()
+    } else {
+        column
+            .flex_1()
+            .min_w_0()
+            .whitespace_normal()
+            .into_any_element()
+    }
 }
 
 // ── inline edit diff ───────────────────────────────────────────────────────
@@ -8227,6 +8260,32 @@ fn tool_command(tool: &ToolCall) -> Option<String> {
 /// filled the truncated header and every row looked the same. A `cd`
 /// anywhere else is kept — where a command ran is a fact. Never strips the
 /// command to nothing, and stops at the first clause it cannot read safely.
+/// The byte length of a leading `path:line:` (or `path:line:col:`) location,
+/// as grep, rg and compilers print it, so the location can be dimmed and the
+/// matched text lead. The path must look like one (it has a `/` or a `.`),
+/// so a prose line such as `error:12: …` is left alone.
+fn location_prefix_len(line: &str) -> Option<usize> {
+    let path_end = line.find(':')?;
+    let path = &line[..path_end];
+    if path.is_empty()
+        || path.contains(char::is_whitespace)
+        || !(path.contains('/') || path.contains('.'))
+    {
+        return None;
+    }
+    let mut end = path_end + 1;
+    let mut numbers = 0;
+    while numbers < 2 {
+        let digits = line[end..].bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 || line.as_bytes().get(end + digits) != Some(&b':') {
+            break;
+        }
+        end += digits + 1;
+        numbers += 1;
+    }
+    (numbers > 0).then_some(end)
+}
+
 fn command_preview(command: &str, workspace: Option<&Path>) -> String {
     let workspace = workspace
         .map(|root| root.to_string_lossy().trim_end_matches('/').to_string())
@@ -8809,6 +8868,8 @@ impl StreamFade {
 ///
 /// Line height must clear inline-code backgrounds: a tight 14/22 measure let
 /// the next wrapped line (and the next block) paint through the previous one.
+/// Inline code now paints as a chip fitted to the text ([`inline_code_chip`]),
+/// so the wash no longer fills the whole line either way.
 fn paragraph_text(
     text: &str,
     size: f32,
@@ -8819,6 +8880,20 @@ fn paragraph_text(
     theme: Theme,
 ) -> impl IntoElement {
     paragraph_text_live(text, size, line_height, weight, color, key, theme, false)
+}
+
+/// The shape inline code paints as (#168): the keycap's geometry — 4px
+/// corners (`Radius::Small`) and a little side padding — over the existing
+/// `inline_code_bg` wash, fitted to the text's height instead of filling the
+/// line. Only runs with exactly that wash take it, so a text selection or a
+/// colour swatch drawn as a run background keeps its plain rectangle.
+pub(crate) fn inline_code_chip(theme: &Theme) -> gpui::TextBackgroundChip {
+    gpui::TextBackgroundChip {
+        color: theme.inline_code_bg,
+        corner_radius: Radius::Small.px(theme),
+        padding_x: DynamicSpacing::Base03.px(theme),
+        padding_y: DynamicSpacing::Base01.px(theme),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8874,7 +8949,9 @@ fn paragraph_text_live(
             .child(
                 SelectableText::new(
                     key,
-                    StyledText::new(body).with_runs(runs),
+                    StyledText::new(body)
+                        .with_runs(runs)
+                        .with_background_chips(inline_code_chip(&theme)),
                     plain,
                     links,
                     Some(scope),
@@ -8886,7 +8963,13 @@ fn paragraph_text_live(
         let ranges: Vec<Range<usize>> = links.iter().map(|(range, _)| range.clone()).collect();
         wrapper
             .child(
-                InteractiveText::new(key, StyledText::new(body).with_runs(runs)).on_click(
+                InteractiveText::new(
+                    key,
+                    StyledText::new(body)
+                        .with_runs(runs)
+                        .with_background_chips(inline_code_chip(&theme)),
+                )
+                .on_click(
                     ranges,
                     move |range_ix: usize, _, cx| {
                         if let Some((_, url)) = links.get(range_ix) {
@@ -10338,7 +10421,9 @@ fn render_mermaid_block(
 /// does not (light palettes, Reduce Transparency, Increase Contrast, no
 /// backdrop pass) it stays the opaque `code_bg` card with its hairline.
 fn code_block_surface(el: gpui::Div, theme: Theme) -> gpui::Div {
-    if theme.floating_glass_sigma().is_some() {
+    if let Some(fill) = theme.on_page_glass_code_card(theme.code_bg) {
+        el.inspector_card(&theme, fill)
+    } else if theme.floating_glass_sigma().is_some() {
         el.inspector_card(&theme, theme.inspector_well(theme.code_bg))
     } else {
         el.rounded(panel::RADIUS.px(&theme))
@@ -12797,6 +12882,48 @@ mod tests {
         assert!(block_gap(&para(), &list()) < block_gap(&list(), &para()));
     }
 
+    /// #168: inline code paints as the keycap's shape over its own wash —
+    /// 4px corners, 3px each side, 1px over the text — and only runs with
+    /// exactly that wash take it.
+    #[test]
+    fn inline_code_chip_uses_the_keycap_shape_over_the_code_wash() {
+        for theme in [Theme::dark(), Theme::light()] {
+            let chip = inline_code_chip(&theme);
+            assert_eq!(chip.color, theme.inline_code_bg);
+            assert_eq!(chip.corner_radius, Radius::Small.px(&theme));
+            assert_eq!(chip.padding_x, DynamicSpacing::Base03.px(&theme));
+            assert_eq!(chip.padding_y, DynamicSpacing::Base01.px(&theme));
+            assert_ne!(chip.color, theme.selection, "a selection stays a rectangle");
+        }
+    }
+
+    /// The chip geometry the vendored gpui paints (`TextBackgroundChip`).
+    #[test]
+    fn a_background_chip_hugs_the_text_and_pads_its_sides() {
+        let chip = gpui::TextBackgroundChip {
+            color: Theme::dark().inline_code_bg,
+            corner_radius: px(4.),
+            padding_x: px(3.),
+            padding_y: px(1.),
+        };
+        let run = gpui::Bounds {
+            origin: gpui::point(px(100.), px(50.)),
+            size: gpui::size(px(40.), px(26.)),
+        };
+        // 26px line, 14px of text (ascent 11 + descent 3): the text box sits
+        // 6px down; the chip is that box plus 1px above and below, plus 3px
+        // each side.
+        let bounds = chip.bounds(run, px(26.), px(11.), px(3.));
+        assert_eq!(bounds.origin, gpui::point(px(97.), px(55.)));
+        assert_eq!(bounds.size, gpui::size(px(46.), px(16.)));
+        // A line no taller than the text clips the padding to the line.
+        let tight = chip.bounds(run, px(14.), px(11.), px(3.));
+        assert_eq!((tight.origin.y, tight.size.height), (px(50.), px(14.)));
+        // The radius never exceeds a capsule.
+        assert_eq!(chip.radius(px(16.)), px(4.));
+        assert_eq!(chip.radius(px(6.)), px(3.));
+    }
+
     #[test]
     fn inline_runs_pairs_link_ranges_with_urls() {
         let theme = Theme::dark();
@@ -14231,7 +14358,7 @@ mod tests {
         assert_eq!(open_children.borrow().get(&(0, 0)), Some(&1));
         assert!(
             cx.debug_bounds("subagent-row-focus-ring").is_none(),
-            "a click does not take focus"
+            "no focus ring"
         );
         cx.simulate_click(second, gpui::Modifiers::none());
         draw(cx);
@@ -14240,11 +14367,11 @@ mod tests {
         // Tab reaches the first row and paints its ring over the row.
         cx.update(|window, _| window.focus_next());
         draw(cx);
-        let ring = cx
-            .debug_bounds("subagent-row-focus-ring")
-            .expect("a focused row wears the ring");
-        let first = cx.debug_bounds("subagent-row-0-0-0").expect("first row");
-        assert_eq!(ring, first, "the ring sits exactly on the row, no layout");
+        // Tab still reaches the row; Orbit just paints no ring on it.
+        assert!(
+            cx.debug_bounds("subagent-row-focus-ring").is_none(),
+            "a focused row draws no ring"
+        );
 
         cx.simulate_keystrokes("enter");
         draw(cx);
@@ -14298,7 +14425,7 @@ mod tests {
         assert!(open.borrow().contains(&(0, 0)), "a click opens the row");
         assert!(
             cx.debug_bounds("tool-toggle-focus-0-0-ring").is_none(),
-            "a click does not take focus"
+            "no focus ring"
         );
         cx.simulate_click(header, gpui::Modifiers::none());
         draw(cx);
@@ -14306,11 +14433,11 @@ mod tests {
 
         cx.update(|window, _| window.focus_next());
         draw(cx);
-        let ring = cx
-            .debug_bounds("tool-toggle-focus-0-0-ring")
-            .expect("a focused row wears the ring");
-        let header = cx.debug_bounds("tool-header-0-0").expect("header");
-        assert_eq!(ring, header, "the ring sits exactly on the header, no layout");
+        // Tab still reaches the row; Orbit just paints no ring on it.
+        assert!(
+            cx.debug_bounds("tool-toggle-focus-0-0-ring").is_none(),
+            "a focused row draws no ring"
+        );
 
         cx.simulate_keystrokes("enter");
         draw(cx);
@@ -14774,6 +14901,122 @@ mod tests {
         assert!(cx.debug_bounds("tool-section-label-0-0-0").is_none(), "no Arguments");
         assert!(cx.debug_bounds("tool-section-label-0-0-1").is_none(), "no Output label");
         assert!(cx.debug_bounds("tool-section-copy-0-0-1").is_some(), "one copy control");
+    }
+
+    fn bash_tool(command: &str, output: &str) -> ToolCall {
+        ToolCall {
+            name: "bash".into(),
+            summary: String::new(),
+            path: None,
+            added: 0,
+            removed: 0,
+            id: None,
+            args: Some(serde_json::json!({ "command": command })),
+            output: Some(serde_json::json!({ "content": [{ "type": "text", "text": output }] })),
+            failed: false,
+            facts: Default::default(),
+            details: None,
+        }
+    }
+
+    /// An open command card says its command once: the header drops its
+    /// truncated preview, the command block has no "Command" label (its `$`
+    /// names it) and keeps one copy control, and the output keeps its label
+    /// and line count. Its long lines scroll sideways instead of wrapping.
+    #[gpui::test]
+    fn an_open_command_card_shows_the_command_once(cx: &mut gpui::TestAppContext) {
+        let long = format!("src/app/remote_ui_tests.rs:181:{}", "x".repeat(400));
+        let tool = bash_tool("rg -n workflow_mode src/app", &format!("{long}\nshort.rs:3:ok"));
+        struct Column(ToolCall);
+        impl gpui::Render for Column {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div().w(px(500.)).min_w_0().flex().flex_col().child(render_activity_card(
+                    &self.0,
+                    false,
+                    theme::Theme::for_id(theme::ThemeId::Orbit),
+                    None,
+                    (0, 0),
+                    true,
+                    Rc::new(RefCell::new(HashSet::new())),
+                    Rc::new(RefCell::new(HashMap::new())),
+                    Rc::new(RefCell::new(HashMap::new())),
+                    Rc::new(RefCell::new(HashMap::new())),
+                    Rc::new(RefCell::new(HashSet::new())),
+                    MessageScrollerState::new(1),
+                    None,
+                    None,
+                    None,
+                ))
+            }
+        }
+        let (view, cx) = cx.add_window_view(|_, _| Column(tool));
+        cx.draw(
+            point(px(0.), px(0.)),
+            gpui::size(px(600.), px(600.)),
+            |_, _| view.clone(),
+        );
+        assert!(
+            cx.debug_bounds("tool-command-preview-0-0").is_none(),
+            "the open header does not repeat the command"
+        );
+        assert!(cx.debug_bounds("tool-section-label-0-0-0").is_none(), "no Command label");
+        assert!(cx.debug_bounds("tool-section-copy-0-0-0").is_some(), "the command copies");
+        assert!(cx.debug_bounds("tool-section-label-0-0-1").is_some(), "Output keeps its label");
+        // Two output lines are two rows: the 400-character one did not wrap.
+        // Inside a 500px column (the transcript's role), the 400-character
+        // line scrolls inside its block: neither copy control is pushed out.
+        for copy in ["tool-section-copy-0-0-0", "tool-section-copy-0-0-1"] {
+            let bounds = cx.debug_bounds(copy).expect("copy control");
+            assert!(bounds.right() <= px(500.), "{copy} at {bounds:?} left the column");
+        }
+    }
+
+    /// Folded, the header still previews the command.
+    #[gpui::test]
+    fn a_folded_command_card_previews_its_command(cx: &mut gpui::TestAppContext) {
+        struct Folded(ToolCall);
+        impl gpui::Render for Folded {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                render_activity_card(
+                    &self.0,
+                    false,
+                    theme::Theme::for_id(theme::ThemeId::Orbit),
+                    None,
+                    (0, 0),
+                    false,
+                    Rc::new(RefCell::new(HashSet::new())),
+                    Rc::new(RefCell::new(HashMap::new())),
+                    Rc::new(RefCell::new(HashMap::new())),
+                    Rc::new(RefCell::new(HashMap::new())),
+                    Rc::new(RefCell::new(HashSet::new())),
+                    MessageScrollerState::new(1),
+                    None,
+                    None,
+                    None,
+                )
+            }
+        }
+        let (view, cx) =
+            cx.add_window_view(|_, _| Folded(bash_tool("cargo test", "ok")));
+        cx.draw(
+            point(px(0.), px(0.)),
+            gpui::size(px(600.), px(600.)),
+            |_, _| view.clone(),
+        );
+        assert!(cx.debug_bounds("tool-command-preview-0-0").is_some());
+    }
+
+    #[test]
+    fn grep_locations_are_found_and_prose_is_left_alone() {
+        assert_eq!(location_prefix_len("src/a.rs:12:fn main() {"), Some(12));
+        assert_eq!(location_prefix_len("src/a.rs:12:4: error"), Some(14));
+        assert_eq!(location_prefix_len("crates/x/y_tests.rs:181:    app"), Some(24));
+        // Not locations: prose, a word with no path shape, no line number.
+        assert_eq!(location_prefix_len("error:12: boom"), None);
+        assert_eq!(location_prefix_len("note: see above"), None);
+        assert_eq!(location_prefix_len("src/a.rs: no number"), None);
+        assert_eq!(location_prefix_len("two words.rs:3: x"), None);
+        assert_eq!(location_prefix_len(""), None);
     }
 
     #[gpui::test]

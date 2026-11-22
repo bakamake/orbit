@@ -686,6 +686,33 @@ image blur, and a bottom fade. The separate **Bottom fade** preference works in
 both Hero and Full window placements and blends into the live theme canvas at
 paint time, without modifying the source image or changing wallpaper defaults.
 
+A wallpaper with any artwork effect on (Dither, Halftone, ASCII or Scanlines,
+at any strength, Hero or Full window) carries the new-task page's living
+field: `backdrop::overlay` paints the same drifting tone, screened monogram
+and sweeping light on a clear plane over the treated picture, at the picture's
+own image opacity, printed through the effect's own `backdrop::Screen` —
+ordered dither, halftone dots whose area is the tone, the ASCII ramp shared
+with `wallpaper_fx`, or fixed scanlines whose thickness follows the tone
+(they once rolled downward, which turned over a third of the plane per frame
+and strobed; `no_screen_flickers_between_frames` now holds every screen under
+3 % per frame) — at the effect's pixel size. It shares the
+backdrop's clock and raster-ahead cache, and moves only on the new-task page
+in a frontmost window; behind a chat, Settings or a feature page it holds the
+frame it was showing, and Reduce Motion freezes it. The Settings preview shows
+it at rest.
+
+The field is deliberately light. It runs at 10 Hz, not 30: the field drifts so
+slowly that at 30 Hz consecutive frames differed in 0.01–0.03 % of their pixels,
+while each frame paid for a full raster, a texture upload and a whole-window
+repaint with every frosted pane's backdrop blur. Both the new-task backdrop and
+the wallpaper field also stop whenever the window is in the background
+(`OrbitApp::tick_backdrop` reads `window_active`), dropping their clock and
+asking for no repaint, and resume from the frame they held. Covered by unit
+tests for the clear raster, every screen, which settings animate, the 10 Hz
+beat and the background pause (each screen rasters within the cost of the
+original dither); a manual pass in the
+running app, including frame cost behind frosted panes, is still outstanding.
+
 The component layer (D22) is complete: every element family has one owner in
 `crates/orbit-pi/src/ui/`, surfaces import `crate::ui::prelude`, `app/helpers.rs`
 is gone, and `scripts/check_ui_owners.py` guards ownership. The Explorer,
@@ -1264,7 +1291,7 @@ the product; the per-item detail lives in AGENTS.md.
 | P2 | Data layer: serde models, sessions/catalog/workbench clients | ✅ Shipped |
 | P3 | Core chat: transcript, streaming, markdown, composer, tools, diff | ✅ Shipped (stream veil + explicit ≤8.3 Hz pipeline open) |
 | P4 | Workbench pages + settings persistence | ✅ Shipped (plus Explorer/Files, terminal, Git/GitHub, localization, updater) |
-| P5 | Mermaid + a11y | ◐ Native flowchart rendering + code-block fallback for the rest + reduce-motion shipped; other diagram types, app-wide focus rings, screen-reader labeling open |
+| P5 | Mermaid + a11y | ◐ Native flowchart rendering + code-block fallback for the rest + reduce-motion shipped; other diagram types, screen-reader labeling open; focus rings are deliberately not painted (keyboard focus still moves) |
 | P6 | Tests, perf harness, packaging/notarization, CI | ◐ Unit/live tests, 10k perf test, signed `.app`/DMG, CI shipped; on-device scroll benchmark + streaming edge coverage open |
 
 Transcript Markdown export is available from each settled response's footer and,
@@ -1273,7 +1300,7 @@ output and image data and refuses to overwrite existing files. Manual GUI
 verification remains open (`docs/plans/transcript-actions.md`).
 
 Open backlog (detail in AGENTS.md): on-device scroll-perf measurement,
-stream veil, explicit streaming commit pipeline, app-wide focus rings, screen-reader labeling, richer
+stream veil, explicit streaming commit pipeline, screen-reader labeling, richer
 per-tool renderers, Windows/Linux native polish.
 
 ## Top risks (with mitigations)

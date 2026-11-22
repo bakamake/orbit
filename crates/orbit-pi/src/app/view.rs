@@ -734,6 +734,17 @@ impl Render for OrbitApp {
             }
         }
 
+        // The page that shows the living field: the new-task page, and nothing
+        // over it. Only there does a treated wallpaper move; behind a chat,
+        // Settings or a feature page it holds still, so reading and working
+        // never pay for a field the page tint all but hides.
+        let new_task_showing = empty
+            && !self.settings_open
+            && self.dependencies_ready()
+            && !self.setup_open
+            && !(feature_open || pane_full);
+        let field_live = new_task_showing && self.window_active;
+
         div()
             .size_full()
             .flex()
@@ -754,7 +765,18 @@ impl Render for OrbitApp {
             // the main column instead (`new_task_backdrop`); full-window owns
             // the whole root, so the sidebar's translucent fill reveals it.
             .children(if theme.wallpaper.full_window {
-                crate::wallpaper::layer(theme, theme::reduce_motion(cx))
+                let layer = crate::wallpaper::layer(
+                    theme,
+                    theme::reduce_motion(cx),
+                    self.backdrop_phase,
+                    field_live,
+                );
+                // A treated picture moves only on the new-task page; there its
+                // field keeps the backdrop clock running.
+                if layer.is_some() && new_task_showing && crate::wallpaper::settings().animates() {
+                    self.backdrop_live = true;
+                }
+                layer
             } else {
                 None
             })
@@ -1162,7 +1184,7 @@ impl Render for OrbitApp {
             // ── main ──
             .child(if self.settings_open {
                 // Settings owns the whole column — it has its own nav.
-                self.render_settings(window, cx).into_any_element()
+                self.render_settings(cx).into_any_element()
             } else if !self.dependencies_ready() {
                 // Missing runtime pieces (pi / node): show the setup page
                 // with install commands instead of the empty composer.
@@ -2088,7 +2110,6 @@ impl OrbitApp {
                             .id(ElementId::Name(format!("suggestion-{index}").into()))
                             .debug_selector(move || format!("follow-up-suggestion-{index}"))
                             .focusable()
-                            .focus(|style| style.border_color(theme.focus_ring))
                             .on_key_down(cx.listener(
                                 move |app, event: &gpui::KeyDownEvent, window, cx| {
                                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
@@ -2136,7 +2157,6 @@ impl OrbitApp {
                         .render(&theme)
                         .debug_selector(|| "dismiss-follow-up-suggestions".to_string())
                         .focusable()
-                        .focus(|style| style.border_1().border_color(theme.focus_ring))
                         .on_key_down(cx.listener(|app, event: &gpui::KeyDownEvent, window, cx| {
                             if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                                 cx.stop_propagation();
@@ -2799,9 +2819,17 @@ impl OrbitApp {
         // procedural dot field is the page's only backdrop.
         let wallpaper = crate::wallpaper::settings();
         if wallpaper.enabled() {
-            self.backdrop_live = false;
+            // The flag is left alone here: `render` cleared it, and a
+            // full-window dithered wallpaper painted at the root has already
+            // set it. Only a dithered hero picture sets it below.
             if wallpaper.mode == crate::wallpaper::WallpaperMode::FullWindow {
                 return None;
+            }
+            // Hero places the picture only on this page, so it is live here
+            // whenever the window is frontmost.
+            let layer = crate::wallpaper::layer(theme, reduce_motion, phase, self.window_active);
+            if layer.is_some() && wallpaper.animates() {
+                self.backdrop_live = true;
             }
             return Some(
                 div()
@@ -2812,7 +2840,7 @@ impl OrbitApp {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .children(crate::wallpaper::layer(theme, reduce_motion))
+                    .children(layer)
                     .into_any_element(),
             );
         }
@@ -2823,9 +2851,10 @@ impl OrbitApp {
             self.backdrop_live = false;
             return None;
         }
-        // The procedural field animates; a wallpaper is a still, so the
-        // heartbeat only runs on the no-wallpaper path. `render` clears the
-        // flag before this runs, so a frame that skips the backdrop leaves it
+        // The procedural field animates. A wallpaper is a still unless its
+        // Dither effect is on, when it carries this same field (see the
+        // wallpaper branch above and the root layer). `render` clears the
+        // flag before this runs, so a frame that skips every field leaves it
         // false.
         self.backdrop_live = true;
         Some(
@@ -2837,7 +2866,11 @@ impl OrbitApp {
                 .left_0()
                 .right_0()
                 .bottom_0()
-                .child(crate::backdrop::layer(theme, phase, !reduce_motion))
+                .child(crate::backdrop::layer(
+                    theme,
+                    phase,
+                    !reduce_motion && self.window_active,
+                ))
                 .into_any_element(),
         )
     }
@@ -4129,7 +4162,7 @@ impl OrbitApp {
                 &theme,
                 open,
                 icon(
-                    "icons/info.svg",
+                    "icons/session-details.svg",
                     ButtonSize::Medium.icon_size().px(&theme),
                     if open {
                         theme.text_primary
@@ -4813,7 +4846,7 @@ impl OrbitApp {
         )
             .group(BUTTON_GROUP)
             .rounded_full()
-            .raised(theme.surface_elevated, &theme)
+            .raised(theme.control_face(theme.surface_elevated), &theme)
             .hover_danger(&theme)
             .pressed_state(&theme, PressedRamp::Danger)
             .cursor_pointer()
@@ -5184,7 +5217,7 @@ impl OrbitApp {
                     .mx(DynamicSpacing::Base12.px(&theme))
                     .mb(DynamicSpacing::Base08.px(&theme))
                     .border_color(theme.border_strong)
-                    .bg(theme.surface_secondary)
+                    .bg(theme.control_inset(theme.surface_secondary))
                     .child(prompt.input.clone()),
             );
         }
@@ -5582,7 +5615,6 @@ impl OrbitApp {
                         input_field_frame(div(), &theme)
                             .flex_1()
                             .min_w_0()
-                            .bg(theme.background)
                             .overflow_hidden()
                             .child(edit.input.clone()),
                     )

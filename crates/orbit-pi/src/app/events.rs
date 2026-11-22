@@ -49,8 +49,9 @@ impl OrbitApp {
             cx.notify();
         }
         // The new-task page's dithered field is alive: advance its clock and
-        // repaint. Only that page pays for it, and Reduce Motion freezes it.
-        if self.advance_backdrop(theme::reduce_motion(cx)) {
+        // repaint. Only that page pays for it, and Reduce Motion or a window
+        // in the background freezes it.
+        if self.advance_backdrop(theme::reduce_motion(cx) || !self.window_active) {
             cx.notify();
         }
         // Session retention: once per launch, archive or delete sessions the
@@ -566,7 +567,14 @@ impl OrbitApp {
     /// frame change and repaints; the other finds nothing changed, so the page
     /// still paints once per field frame.
     pub fn tick_backdrop(&mut self, cx: &mut Context<Self>) -> bool {
-        let moving = self.backdrop_live && !theme::reduce_motion(cx);
+        // A window in the background (another app frontmost, minimised, or
+        // closed to the Dock) holds the frame it was showing: no raster, no
+        // upload, no repaint, no blur pass for a field nobody is watching. It
+        // resumes from the same phase when the window comes back.
+        let moving = self.backdrop_live && self.window_active && !theme::reduce_motion(cx);
+        if !moving {
+            self.backdrop_clock = None;
+        }
         if moving && self.advance_backdrop(false) {
             cx.notify();
         }
@@ -584,9 +592,10 @@ impl OrbitApp {
     ///
     /// The phase is wall-clock seconds, not a tick counter: the heartbeat's
     /// cadence changes with the run state, and the field must not speed up
-    /// while something else streams. The clock only runs while the page is
-    /// actually on screen (`render` records that), so a backdrop nobody can see
-    /// costs nothing. Reduce Motion holds the frame it was showing — a halftone
+    /// while something else streams. The clock only runs while a field is
+    /// actually on screen — the new-task page, or a wallpaper with its Dither
+    /// effect on (`render` records both) — so a field nobody can see costs
+    /// nothing. Reduce Motion holds the frame it was showing — a halftone
     /// is a perfectly good still.
     fn advance_backdrop(&mut self, reduce_motion: bool) -> bool {
         if !self.backdrop_live || reduce_motion {

@@ -426,5 +426,21 @@ mod tests {
         }
         let chrome = include_str!("../chrome.rs");
         assert!(!chrome.contains(".a *="));
+        // A hand-built faced control (the Sync split button, the composer's
+        // stop, a stepper) takes its face from `control_face`, so it turns to
+        // glass with every shared button instead of staying an opaque slab.
+        for (name, source) in [
+            ("git", git),
+            ("view", include_str!("../../app/view.rs")),
+            ("mcp", mcp),
+            ("subagents", include_str!("../../app/subagents_ui.rs")),
+            ("ui/button", include_str!("../button.rs")),
+            ("ui/chip", include_str!("../chip.rs")),
+        ] {
+            assert!(
+                !source.contains(".raised(theme.surface_elevated"),
+                "{name} paints an opaque control face"
+            );
+        }
     }
 }

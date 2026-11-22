@@ -23,7 +23,7 @@ use crate::theme::{
     Theme,
 };
 use crate::ui::icon::icon;
-use crate::ui::style::control::{ControlExt, TipExt};
+use crate::ui::style::control::TipExt;
 
 /// A settings label and optional supporting text beside an intrinsic-size control.
 pub(crate) fn setting_row(
@@ -99,7 +99,6 @@ pub(crate) fn picker_entry<E: Styled + InteractiveElement>(el: E, theme: &Theme)
         .items_center()
         .gap(list_item::content_gap(theme))
         .text_size(picker::TEXT.px(theme))
-        .focus_state(theme)
 }
 
 /// One fixed text line box inside a picker row, at the Comfortable leading
@@ -505,22 +504,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_cursor_changes_the_hairline_never_the_geometry() {
+    fn a_nav_row_reserves_a_clear_edge_and_draws_no_ring() {
         use gpui::{div, Styled};
         for id in crate::theme::ThemeId::ALL {
             let theme = Theme::for_id(id);
             for height in [NavRowHeight::Header, NavRowHeight::Item] {
-                let mut rest = nav_row(div(), &theme, height, false);
-                let mut cursor = nav_row(div(), &theme, height, true);
-                let (rest, cursor) = (rest.style(), cursor.style());
-                assert_eq!(rest.min_size, cursor.min_size, "{id:?} {height:?}");
+                let mut row = nav_row(div(), &theme, height);
+                let style = row.style();
                 assert_eq!(
-                    rest.border_widths, cursor.border_widths,
-                    "{id:?} {height:?}"
+                    style.border_widths.left,
+                    Some(crate::theme::tokens::BORDER_WIDTH.into()),
+                    "{id:?} {height:?}: the 1px edge is reserved"
                 );
-                assert_eq!(rest.corner_radii, cursor.corner_radii, "{id:?} {height:?}");
-                assert_eq!(cursor.border_color, Some(theme.focus_ring));
-                assert_eq!(rest.border_color.map(|c| c.a), Some(0.));
+                assert_eq!(style.border_color.map(|c| c.a), Some(0.), "and clear");
             }
         }
     }
@@ -529,8 +525,8 @@ mod tests {
     fn items_share_one_height_and_headers_are_shorter() {
         use gpui::{div, Styled};
         let theme = Theme::dark();
-        let mut item = nav_row(div(), &theme, NavRowHeight::Item, false);
-        let mut header = nav_row(div(), &theme, NavRowHeight::Header, false);
+        let mut item = nav_row(div(), &theme, NavRowHeight::Item);
+        let mut header = nav_row(div(), &theme, NavRowHeight::Header);
         assert_eq!(
             item.style().min_size.height,
             Some(ButtonSize::Medium.height(&theme).into())
@@ -597,23 +593,19 @@ impl NavRowHeight {
 
 /// The frame of a navigation row (sidebar sessions, project headers, the
 /// "Show more" / "Show less" rows): full width, at least its height, the list
-/// item's corners, a centered row, and a 1px hairline reserved in every state
-/// so the keyboard cursor's focus ring never shifts the text.
+/// item's corners, a centered row, and a clear 1px edge reserved in every
+/// state, so the row keeps the geometry it was laid out at.
 ///
 /// The caller keeps the padding and gap (a header's glyph sits further out
 /// than a session's), the id, and every handler — rows here are drag handles,
 /// drop targets and context-menu anchors, so the frame is a style seam rather
 /// than a wrapper. Fill is [`nav_row_fill`], faded in with `motion::hover`.
-pub(crate) fn nav_row<E: Styled>(el: E, theme: &Theme, height: NavRowHeight, cursor: bool) -> E {
+pub(crate) fn nav_row<E: Styled>(el: E, theme: &Theme, height: NavRowHeight) -> E {
     el.w_full()
         .min_h(height.size().height(theme))
         .rounded(list_item::RADIUS.px(theme))
         .border_1()
-        .border_color(if cursor {
-            theme.focus_ring
-        } else {
-            gpui::transparent_black()
-        })
+        .border_color(gpui::transparent_black())
         .flex()
         .items_center()
 }

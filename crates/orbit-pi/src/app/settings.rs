@@ -617,30 +617,6 @@ enum PluginOp {
     Remove,
 }
 
-/// Whether a Settings navigation row draws the focus ring: only for the
-/// keyboard cursor, and only when it rests *away* from the open section. On
-/// the selected row the selected fill already says where you are, so clicking
-/// a section (which focuses the list) never leaves a ring around it.
-fn settings_nav_ring(list_focused: bool, cursor: usize, index: usize, selected: bool) -> bool {
-    list_focused && cursor == index && !selected
-}
-
-#[cfg(test)]
-mod settings_nav_ring_tests {
-    use super::settings_nav_ring;
-
-    #[test]
-    fn the_ring_marks_only_a_cursor_away_from_the_selection() {
-        // A click: the list is focused and the cursor is the selected row.
-        assert!(!settings_nav_ring(true, 3, 3, true));
-        // Arrowing onto another row: that row shows where Enter will go.
-        assert!(settings_nav_ring(true, 4, 4, false));
-        // Every other row, and an unfocused list, draw nothing.
-        assert!(!settings_nav_ring(true, 4, 3, true));
-        assert!(!settings_nav_ring(false, 4, 4, false));
-    }
-}
-
 impl OrbitApp {
     // ── settings surface ───────────────────────────────────────────
     // Left nav (Back + sections), right column of setting
@@ -650,12 +626,10 @@ impl OrbitApp {
 
     pub(super) fn render_settings(
         &self,
-        window: &Window,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
         let this = cx.entity();
         let theme = *theme::get(cx);
-        let nav_focused = self.settings_nav_focus.is_focused(window);
 
         div()
             .flex_1()
@@ -760,12 +734,6 @@ impl OrbitApp {
                                     let this = this.clone();
                                     let label = tr!(label_key).to_string();
                                     let selected = self.settings_section == section;
-                                    let focused = settings_nav_ring(
-                                        nav_focused,
-                                        self.settings_nav_cursor,
-                                        index,
-                                        selected,
-                                    );
                                     // Group starts: Runtime opens the agent
                                     // block, Skills opens the extensions
                                     // block, and About closes the list alone.
@@ -785,11 +753,7 @@ impl OrbitApp {
                                         .px(DynamicSpacing::Base08.px(&theme))
                                         .rounded(Radius::Medium.px(&theme))
                                         .border_1()
-                                        .border_color(if focused {
-                                            theme.focus_ring
-                                        } else {
-                                            gpui::transparent_black()
-                                        })
+                                        .border_color(gpui::transparent_black())
                                         .text_size(TextSize::Default.px(&theme))
                                         .flex()
                                         .items_center()
@@ -1934,7 +1898,6 @@ impl OrbitApp {
         let field = input_field_frame(div(), &theme)
             .flex_1()
             .min_w_0()
-            .bg(theme.background)
             .child(icon(
                 "icons/extensions.svg",
                 IconSize::Small.px(&theme),
@@ -3137,7 +3100,7 @@ impl OrbitApp {
             .size(ButtonSize::Large.height(&theme) + DynamicSpacing::Base04.px(&theme))
             .flex_none()
             .rounded(Radius::Large.px(&theme))
-            .bg(theme.surface_elevated)
+            .bg(theme.control_face(theme.surface_elevated))
             .border_1()
             .border_color(theme.hairline_subtle())
             .flex()
@@ -9496,13 +9459,11 @@ fn background_tile(
 }
 
 fn settings_radio_group(el: Stateful<Div>, theme: &Theme) -> Stateful<Div> {
-    let ring = theme.focus_ring;
     el.focusable()
         .border_1()
         .border_color(gpui::transparent_black())
         .rounded(button::RADIUS.px(theme))
         .p(DynamicSpacing::Base04.px(theme))
-        .focus(move |style| style.border_color(ring))
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
 }
 

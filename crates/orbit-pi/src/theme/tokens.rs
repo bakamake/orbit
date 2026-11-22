@@ -924,8 +924,6 @@ pub enum InteractionState {
     Hover,
     /// The pointer or space bar is held down.
     Pressed,
-    /// Keyboard focus is on the control.
-    Focused,
     /// Present but not operable.
     Disabled,
     /// Not a state: the translucent treatment a control takes when it floats
@@ -938,15 +936,14 @@ impl InteractionState {
     /// The wash painted behind a row, a ghost control, or a menu entry.
     ///
     /// `None` means paint nothing: the control keeps the surface beneath it.
-    /// That covers `Focused` (focus is a frame, never a fill — `DESIGN.md`
-    /// §Focus) and the two role exceptions above.
+    /// Keyboard focus is not a state here at all: Orbit paints no focus ring
+    /// and no focus fill.
     ///
     /// Hover and pressed resolve through [`Theme::hover_wash`] /
     /// [`Theme::pressed_wash`], so a control inside a frosted card or pane
     /// takes an ink wash and one on an opaque surface keeps the palette step.
     pub fn fill(self, theme: &Theme) -> Option<Hsla> {
         match self {
-            Self::Focused => None,
             Self::Hover => Some(theme.hover_wash()),
             Self::Pressed => Some(theme.pressed_wash()),
             Self::Disabled | Self::Glass => Some(theme.overlay),
@@ -955,12 +952,11 @@ impl InteractionState {
 
     /// The frame around the control.
     ///
-    /// Only `Focused` carries the focus ring. `Disabled` gets the quiet
-    /// hairline so a disabled field still reads as a field, and every other
-    /// state keeps whatever border its role defines.
+    /// `Disabled` gets the quiet hairline so a disabled field still reads as
+    /// a field, and every other state keeps whatever border its role defines.
+    /// There is no focus ring.
     pub fn border(self, theme: &Theme) -> Option<Hsla> {
         match self {
-            Self::Focused => Some(theme.focus_ring),
             Self::Disabled => Some(theme.hairline_subtle()),
             _ => None,
         }
@@ -1557,12 +1553,8 @@ mod tests {
     }
 
     #[test]
-    fn only_focus_paints_the_ring_and_only_disabled_paints_the_hairline() {
+    fn only_disabled_paints_the_hairline() {
         let theme = Theme::dark();
-        assert_eq!(
-            InteractionState::Focused.border(&theme),
-            Some(theme.focus_ring)
-        );
         assert_eq!(
             InteractionState::Disabled.border(&theme),
             Some(theme.border_subtle)
@@ -1570,11 +1562,6 @@ mod tests {
         for state in [InteractionState::Hover, InteractionState::Pressed] {
             assert_eq!(state.border(&theme), None, "{state:?} draws no frame");
         }
-        assert_eq!(
-            InteractionState::Focused.fill(&theme),
-            None,
-            "focus is a frame, never a fill"
-        );
     }
 
     #[test]

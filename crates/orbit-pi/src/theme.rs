@@ -321,20 +321,6 @@ impl Default for SurfaceTreatment {
     }
 }
 
-/// `ink` at `alpha` painted over an opaque `base`, flattened to one opaque
-/// colour (sRGB source-over).
-fn composite(base: Hsla, ink: Hsla, alpha: f32) -> Hsla {
-    let (base, ink) = (gpui::Rgba::from(base), gpui::Rgba::from(ink));
-    let mix = |b: f32, i: f32| b + (i - b) * alpha;
-    gpui::Rgba {
-        r: mix(base.r, ink.r),
-        g: mix(base.g, ink.g),
-        b: mix(base.b, ink.b),
-        a: base.a,
-    }
-    .into()
-}
-
 /// Semantic palette. Copy so list closures and hover styles can capture it
 /// without a lifetime.
 ///
@@ -1574,8 +1560,15 @@ impl Theme {
 
     /// The composer uses the floating material, with an opaque fallback when
     /// backdrop blur is unavailable or reduced transparency is requested.
+    ///
+    /// On the page glass (full-window wallpaper) the composer sits on the chat
+    /// column, which has already tinted the picture, so it takes the
+    /// transcript cards' rule ([`Self::on_page_glass_fill`]): the frost, a top-up
+    /// to the card's contrast floor and the ink lift, not a second full tint
+    /// that left it a dark slab beside the sidebar's single layer of glass.
     pub fn composer_fill(self) -> Hsla {
-        self.inspector_fill(self.surface_secondary)
+        self.on_page_glass_fill(self.surface_secondary)
+            .unwrap_or_else(|| self.inspector_fill(self.surface_secondary))
     }
 
     /// `base` as the card tint only while wallpaper glass actually frosts
@@ -1627,16 +1620,86 @@ impl Theme {
     pub fn inspector_well_with(self, base: Hsla, reduce_transparency: bool) -> Hsla {
         match self.floating_glass_sigma_with(reduce_transparency) {
             None => base,
-            Some(_) => {
-                let floor = self.floating_glass_alpha(base);
-                let alpha = if self.wallpaper.active {
-                    floor.max(self.wallpaper.card_alpha)
-                } else {
-                    floor
-                };
-                base.opacity(alpha)
-            }
+            Some(_) => base.opacity(self.well_alpha(base)),
         }
+    }
+
+    /// The tint of an inspector card laid on the chat column while that
+    /// column is itself page glass (full-window wallpaper with Glass panes on).
+    /// `None` everywhere else, where [`Self::inspector_fill`] already holds.
+    ///
+    /// The column has painted `background` at `panel_alpha` over the picture,
+    /// and the card frosts that composite. A full [`Self::inspector_fill`] on
+    /// top stacked a second card-strength tint, so almost none of the frost
+    /// showed and the card read as an opaque slab beside the sidebar, which is
+    /// one layer of the same glass. Here the card adds only what the column
+    /// has not: `base` up to the card's contrast-floored coverage
+    /// (`card_alpha`, so text keeps its floor), then the `overlay` ink lift a
+    /// raised thing on glass takes, so the frost carries the shape.
+    pub fn on_page_glass_fill(self, base: Hsla) -> Option<Hsla> {
+        self.page_glass_layer(base, self.wallpaper.card_alpha, 0.0, self.overlay.a)
+    }
+
+    /// [`Self::on_page_glass_fill`] for a card whose face is a code well (a
+    /// markdown code block): the same frost and lift, topped up to the well's
+    /// contrast floor ([`Self::inspector_well`]) only where the column falls
+    /// short of it.
+    pub fn on_page_glass_code_card(self, base: Hsla) -> Option<Hsla> {
+        self.page_glass_layer(base, self.well_alpha(base), 0.0, self.overlay.a)
+    }
+
+    /// A code well inside a page-glass card (a tool call's arguments and
+    /// output). The column and the card beneath already cover most of the
+    /// picture, so the well adds only what its contrast floor still asks for
+    /// and no lift of its own; painting the full [`Self::inspector_well`]
+    /// there was a third tint that turned the open card back into a slab.
+    pub fn on_page_glass_well(self, base: Hsla) -> Option<Hsla> {
+        let card = self.on_page_glass_fill(self.surface_secondary)?;
+        self.page_glass_layer(base, self.well_alpha(base), card.a, 0.0)
+    }
+
+    /// The coverage a code well holds over a picture: its own contrast floor,
+    /// and over a wallpaper at least the user's card opacity.
+    fn well_alpha(self, base: Hsla) -> f32 {
+        let floor = self.floating_glass_alpha(base);
+        if self.wallpaper.active {
+            floor.max(self.wallpaper.card_alpha)
+        } else {
+            floor
+        }
+    }
+
+    /// One translucent layer on the page glass: `base` at whatever alpha
+    /// brings the coverage of everything under it — the column's
+    /// `panel_alpha`, then `beneath` — up to `target`, with `overlay` at
+    /// `lift` on top, flattened into the one fill a quad can paint. `None` off
+    /// the page glass.
+    fn page_glass_layer(self, base: Hsla, target: f32, beneath: f32, lift: f32) -> Option<Hsla> {
+        if !self.page_glass() {
+            return None;
+        }
+        self.glass_sigma()?;
+        let under = 1.0 - (1.0 - self.wallpaper.panel_alpha) * (1.0 - beneath);
+        let residual = if under < 1.0 {
+            (1.0 - (1.0 - target) / (1.0 - under)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let alpha = lift + residual * (1.0 - lift);
+        if alpha <= 0.0 {
+            return Some(gpui::transparent_black());
+        }
+        let (base, ink) = (gpui::Rgba::from(base), gpui::Rgba::from(self.overlay));
+        let mix = |b: f32, i: f32| (i * lift + b * residual * (1.0 - lift)) / alpha;
+        Some(
+            gpui::Rgba {
+                r: mix(base.r, ink.r),
+                g: mix(base.g, ink.g),
+                b: mix(base.b, ink.b),
+                a: alpha,
+            }
+            .into(),
+        )
     }
 
     /// Whether a right-dock card is glass: over a full-window wallpaper (the
@@ -1759,19 +1822,39 @@ impl Theme {
         }
     }
 
-    /// Hover on a control with its own opaque face (an Outlined chip, a
-    /// Secondary or Outline button). On an opaque surface it is the palette's
-    /// `surface_hover` step, as before. On glass the faceless wash would
-    /// replace the face with ink at alpha and the control would turn
-    /// see-through under the pointer; instead the face itself is lifted by
-    /// that same ink layer, composited, so it stays opaque and the change is
-    /// one subtle step.
-    pub fn face_hover(self, face: Hsla) -> Hsla {
+    /// The face of a control that carries one (a Secondary, Outline or Danger
+    /// button, an outlined chip, a file chip, a segmented group, a raised
+    /// tile). On an opaque surface it is exactly `face`. On glass the face is
+    /// glass too: `overlay` ink at low alpha under the control's hairline, so
+    /// the frost behind it shows through instead of an opaque slab sitting on
+    /// the pane — the same material as a hovered row or the sidebar's
+    /// selected task.
+    pub fn control_face(self, face: Hsla) -> Hsla {
         if self.controls_on_glass() {
-            composite(face, self.text_primary, self.overlay_strong.a)
+            self.overlay
         } else {
-            self.surface_hover
+            face
         }
+    }
+
+    /// [`Self::control_face`] for a recessed face (a text field, an inset
+    /// chip or segmented track): on glass `face` at the palette's own
+    /// `overlay_strong` alpha, a faint well that keeps the frost visible,
+    /// instead of an opaque hole cut into the glass. Exactly `face` elsewhere.
+    pub fn control_inset(self, face: Hsla) -> Hsla {
+        if self.controls_on_glass() {
+            face.opacity(self.overlay_strong.a)
+        } else {
+            face
+        }
+    }
+
+    /// Hover on a control with its own face ([`Self::control_face`]). On an
+    /// opaque surface it is the palette's `surface_hover` step. On glass the
+    /// face is already an ink wash, so hover is the next wash up
+    /// ([`Self::hover_wash`]): translucent, one visible step above rest.
+    pub fn face_hover(self, _face: Hsla) -> Hsla {
+        self.hover_wash()
     }
 
     /// The held (pressed, open) wash on glass: `overlay_strong`'s
@@ -3521,6 +3604,103 @@ mod tests {
         );
     }
 
+    /// A card on the page glass is one layer of the sidebar's material, not a
+    /// second slab: with the column already at the card's coverage it adds only
+    /// the ink lift, and when the card's contrast floor asks for more it tops
+    /// the coverage up to exactly that floor. Off the page glass it defers.
+    #[test]
+    fn cards_on_page_glass_add_only_what_the_column_lacks() {
+        for base in [Theme::dark(), Theme::light()] {
+            let full = |card_alpha: f32, panel_alpha: f32, glass: bool| {
+                base.with_wallpaper(SurfaceTreatment {
+                    active: true,
+                    full_window: true,
+                    glass,
+                    card_alpha,
+                    panel_alpha,
+                    ..SurfaceTreatment::OPAQUE
+                })
+            };
+            let even = full(0.82, 0.82, true);
+            let fill = even.on_page_glass_fill(even.surface_secondary).expect("page glass");
+            assert!((fill.a - even.overlay.a).abs() < 1e-4, "only the lift");
+            assert!(fill.a < 0.5, "the frost shows through");
+
+            let floored = full(0.9, 0.8, true);
+            let fill = floored
+                .on_page_glass_fill(floored.surface_secondary)
+                .expect("page glass");
+            let coverage = 1.0 - (1.0 - 0.8) * (1.0 - fill.a);
+            assert!(coverage >= 0.9 - 1e-4, "keeps the card's floor: {coverage}");
+            assert!(fill.a < floored.card_fill(floored.surface_secondary).a);
+
+            // A code well, inside a card or as the card, tops the coverage up
+            // to its own floor and no further, never the full stacked well.
+            for theme in [even, floored] {
+                let code = theme.code_bg;
+                let panel = theme.wallpaper.panel_alpha;
+                let floor = theme.well_alpha(code);
+                let card = theme.on_page_glass_fill(theme.surface_secondary).unwrap();
+                let well = theme.on_page_glass_well(code).unwrap();
+                let covered = 1.0 - (1.0 - panel) * (1.0 - card.a) * (1.0 - well.a);
+                assert!(covered >= floor - 1e-4, "well keeps its floor: {covered}");
+                assert!(well.a < theme.inspector_well_with(code, false).a);
+                let block = theme.on_page_glass_code_card(code).unwrap();
+                let covered = 1.0 - (1.0 - panel) * (1.0 - block.a);
+                assert!(covered >= floor - 1e-4, "code card keeps its floor: {covered}");
+                assert!(block.a >= theme.overlay.a - 1e-4, "and the card lift");
+            }
+
+            for off in [
+                full(0.82, 0.82, false),
+                base.with_wallpaper(SurfaceTreatment {
+                    full_window: false,
+                    ..even.wallpaper
+                }),
+                base,
+            ] {
+                assert_eq!(off.on_page_glass_fill(off.surface_secondary), None);
+                assert_eq!(off.on_page_glass_well(off.code_bg), None);
+                assert_eq!(off.on_page_glass_code_card(off.code_bg), None);
+            }
+        }
+    }
+
+    /// Over a full-window wallpaper the composer is the sidebar's material:
+    /// it adds only the ink lift to a column already at the card's coverage
+    /// (and tops up to the card floor when that is higher), instead of a
+    /// second card-strength tint.
+    #[test]
+    fn the_composer_on_page_glass_is_one_layer_of_glass() {
+        for base in [Theme::dark(), Theme::light()] {
+            let full = base.with_wallpaper(SurfaceTreatment {
+                active: true,
+                full_window: true,
+                glass: true,
+                card_alpha: 0.82,
+                panel_alpha: 0.82,
+                ..SurfaceTreatment::OPAQUE
+            });
+            for empty in [true, false] {
+                let composer = full.for_composer(empty);
+                let fill = composer.composer_fill();
+                assert!((fill.a - composer.overlay.a).abs() < 1e-4, "only the lift");
+                assert!(fill.a < composer.inspector_fill(composer.surface_secondary).a);
+            }
+            // Hero wallpaper sits straight under the composer: one layer of
+            // card glass, unchanged.
+            let hero = base.with_wallpaper(SurfaceTreatment {
+                full_window: false,
+                ..full.wallpaper
+            });
+            let composer = hero.for_composer(true);
+            assert_eq!(
+                composer.composer_fill(),
+                composer.inspector_fill(composer.surface_secondary)
+            );
+        }
+    }
+
     #[test]
     fn composer_glass_tracks_wallpaper_behind_chat() {
         let base = Theme::dark();
@@ -3552,20 +3732,26 @@ mod tests {
         ] {
             let composer = theme.for_composer(empty);
             assert_eq!(composer.glass_sigma().is_some(), frosted);
-            assert_eq!(
-                composer.composer_fill(),
-                composer.inspector_fill(base.surface_secondary)
-            );
+            // On the page glass the composer is one layer of the column's
+            // glass; everywhere else it is the floating material.
+            let expected = composer
+                .on_page_glass_fill(base.surface_secondary)
+                .unwrap_or_else(|| composer.inspector_fill(base.surface_secondary));
+            assert_eq!(composer.composer_fill(), expected);
         }
     }
 
-    /// A control with its own face hovers one subtle, opaque step: the
-    /// palette's hover on an opaque surface, and on glass the face lifted by
-    /// the ink layer — never a see-through wash that drops the face.
+    /// A control with its own face is glass on glass: an `overlay` ink face
+    /// (a recessed one: the face at `overlay_strong` alpha) that lets the
+    /// frost through, hovering to the next wash up. On an opaque surface the
+    /// face and its hover are exactly the palette's steps.
     #[test]
-    fn a_faced_hover_stays_opaque_and_subtle_on_glass() {
+    fn a_faced_control_is_glass_on_glass_and_opaque_elsewhere() {
         for base in [Theme::dark(), Theme::light()] {
-            assert_eq!(base.face_hover(base.surface_elevated), base.surface_hover);
+            let face = base.surface_elevated;
+            assert_eq!(base.control_face(face), face);
+            assert_eq!(base.control_inset(base.background), base.background);
+            assert_eq!(base.face_hover(face), base.surface_hover);
             for floating in [false, true] {
                 let glass = if floating {
                     base.for_floating_with(false)
@@ -3576,12 +3762,14 @@ mod tests {
                     })
                 };
                 if !floating || glass.floating_glass_sigma_with(false).is_some() {
-                    let face = glass.surface_elevated;
+                    let rest = glass.control_face(face);
                     let hover = glass.face_hover(face);
-                    assert!((hover.a - face.a).abs() < 1e-4, "stays as opaque as the face");
-                    assert_ne!(hover, face, "a visible step");
-                    let step = (gpui::Rgba::from(hover).r - gpui::Rgba::from(face).r).abs();
-                    assert!(step < 0.2, "a subtle step, not a jump: {step}");
+                    assert_eq!(rest, glass.overlay, "an ink face");
+                    assert!(rest.a < 0.5, "the frost shows through");
+                    assert!(hover.a > rest.a, "hover is a visible step up");
+                    assert!(hover.a < 0.5, "and stays glass");
+                    let well = glass.control_inset(glass.background);
+                    assert!(well.a < 0.5, "a recessed face is glass too");
                 }
             }
         }

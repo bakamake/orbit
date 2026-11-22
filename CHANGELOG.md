@@ -7,9 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **New Session details icon.** The top-bar button that opens Session details
+  now shows a list icon instead of the info "i", which stays in use for
+  notices and About.
+- **Centred Jump to latest arrow.** The arrow in the round "Jump to latest"
+  button now sits exactly in the middle of its circle; it used to be pulled
+  1px up and to the left.
+- **Cleaner Explorer panel.** The project panel now keeps a minimum width of
+  260px (up from 220px) and opens at 280px, so the workspace name and nested
+  file names stay readable. Long file and folder names end in "…" instead of
+  being cut off, and hovering a row shows its full path. The filter box now
+  lines up with the file tree. When a filter matches nothing, the panel says
+  so instead of claiming the workspace has no files.
+- **No focus rings.** Buttons, chips, rows, fields, switches, Settings, the
+  Explorer tree and transcript disclosures no longer draw a highlighted ring
+  when they have keyboard focus. Tab, the arrow keys, Enter and Space still
+  work as before; nothing moves or changes size.
+- **Project icons without a box.** Sidebar project icons and logos now show
+  on their own, with no tile or outline behind them. Icons keep the same size,
+  so project names still line up.
+- **Animated wallpaper effects.** Every wallpaper effect now moves like the
+  new-session background: the same drifting pattern, Orbit monogram and
+  sweeping light play over your picture in the effect's own style. Dither
+  grain flows, halftone dots swell and shrink, ASCII characters change, and
+  scanlines thicken and thin in place (they no longer roll, which made the
+  screen flicker). The effect's pixel size applies, and Reduce
+  Motion keeps it still.
+- **Lighter background animation.** The new-session background and animated
+  wallpaper now update 10 times a second instead of 30, which looks the same
+  because the pattern drifts slowly. They pause while Orbit is in the
+  background, and a wallpaper stays still behind chats, Settings and other
+  pages, so the CPU and GPU do far less work.
+- **Transcript cards are frosted glass again over a full-window background.**
+  Tool, thought and subagent cards, a tool call's Arguments and Output area,
+  code blocks and the composer now use the same frosted material as the
+  sidebar. Before,
+  each painted another near-opaque tint over the already-tinted chat column,
+  so the frost behind it was almost hidden and an open tool card looked like a
+  dark slab next to a subagent card. Code areas still get just enough extra
+  tint to keep their text readable.
+- **Buttons, chips and fields are frosted glass too.** Over a background (and
+  in dark menus and dialogs), secondary, outline and danger buttons, outlined
+  and file chips, segmented controls, icon tiles and text fields (including
+  the Git page's Sync button, the composer's stop button and the subagent
+  limit stepper, and every text field built on the shared field frame such as
+  Settings → Plugins' install field) now show the
+  frost through a light glass face instead of a solid dark one. Hover, open and
+  selected states are lighter glass steps. Primary, accent and red delete
+  buttons stay solid so they still stand out.
 - **New switch style.** Every settings switch now uses a rounded-rectangle
   track with a rounded-square knob that slides across; it turns green when
   on. The design is adapted from RaspberryBee's Uiverse.io switch (MIT).
+- **New loading spinner.** Loading indicators, including the spinner on a
+  running task in the sidebar, are now one style: a faint full ring with a
+  short arc turning on top.
 - **Sidebar projects, easier to read and manage** (#166). The Projects label,
   project names and project icons are larger. A project's ⋯ menu has
   **Rename…**: the new name shows in the sidebar only, and the folder on disk
@@ -30,6 +81,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row). Remote is always there, even before you set up a host: Add remote
   host… opens Settings → Remote hosts with the form ready. The Experimental tag
   now sits once on the Remote label instead of on every host.
+- **Cleaner command cards.** An open command card shows its command once:
+  the header no longer repeats a cut-off copy, and the command block drops
+  its "Command" label (the `$` already says it). Output keeps one line per
+  row and scrolls sideways instead of wrapping into a ragged block, and
+  `file:line:` locations from grep, rg or a compiler are dimmed so the
+  matched text stands out.
+- **Inline code looks like a chip** (#168). Code in answers and thinking
+  (`origin/main`, `npm run build`) now has rounded 4px corners, a little space
+  on each side, and a background fitted to the text instead of a hard
+  rectangle as tall as the line. It keeps the same colour in every theme.
+  Selected text still highlights as a plain block.
 - **Stop matches Send.** The composer's Stop button now shows a small filled
   square instead of a full circle with a square cut out. The old mark filled its
   whole icon box and looked like a bigger, heavier circle inside the round

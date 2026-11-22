@@ -2387,7 +2387,6 @@ impl OrbitApp {
                         .py(px(0.))
                         .px(DynamicSpacing::Base06.px(&theme))
                         .text_size(TextSize::Small.px(&theme))
-                        .bg(theme.background)
                         .overflow_hidden()
                         .child(self.session_name_input.clone()),
                 )

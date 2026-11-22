@@ -1665,6 +1665,8 @@ explorer.files_truncated: "Файлов: %{count}+ (список обрезан)
 explorer.loading: "Загрузка…"
 explorer.no_files: "Нет файлов"
 explorer.no_files_detail: "В этой рабочей области нет видимых файлов."
+explorer.no_matches: "Нет файлов, соответствующих «%{query}»"
+explorer.no_matches_detail: "Попробуйте другое имя или очистите фильтр."
 explorer.load_error: "Не удалось прочитать рабочую область"
 explorer.select_file: "Выберите файл для просмотра"
 explorer.select_file_detail: "Выберите файл на панели проекта, чтобы увидеть его содержимое."

@@ -551,8 +551,8 @@ pub(crate) fn build_date_sidebar_rows(
 /// A day section's label: the bucket name and its count in the same quiet
 /// eyebrow ink as the list's section heading, on a Header-height row so the
 /// sessions under it keep the shared 28px rhythm. Not interactive — the keyboard
-/// cursor may rest on it (and shows that it does), but nothing opens.
-fn date_section_row(bucket: DateBucket, count: usize, cursor: bool, theme: &Theme) -> AnyElement {
+/// cursor may rest on it, but nothing opens.
+fn date_section_row(bucket: DateBucket, count: usize, theme: &Theme) -> AnyElement {
     // Padding, not margin: the virtual list measures each item's border-box.
     let label = nav_row(
         div()
@@ -560,7 +560,6 @@ fn date_section_row(bucket: DateBucket, count: usize, cursor: bool, theme: &Them
             .debug_selector(move || format!("sidebar-date-{bucket:?}")),
         theme,
         NavRowHeight::Header,
-        cursor,
     )
     .px(DynamicSpacing::Base08.px(theme))
     .gap(DynamicSpacing::Base06.px(theme))
@@ -961,7 +960,7 @@ pub(crate) fn status_lane(status: Option<SessionStatus>, review: Option<ReviewMa
 /// on the row that is still happening.
 pub(crate) fn status_lane_icon(lane: StatusLane) -> Option<&'static str> {
     Some(match lane {
-        StatusLane::Progress => "icons/running-spinner.svg",
+        StatusLane::Progress => "icons/loader.svg",
         StatusLane::Blocked(BlockReason::Approval) => "icons/lock.svg",
         StatusLane::Blocked(BlockReason::Input) => "icons/chat.svg",
         StatusLane::UnreadDone => "icons/eye.svg",
@@ -1125,16 +1124,16 @@ fn project_icon(
     theme: &Theme,
 ) -> AnyElement {
     // Untinted project glyphs inherit the theme accent; an explicitly neutral
-    // mark stays neutral. The frame remains neutral in either case.
+    // mark stays neutral.
     let tint = match mark.tint.as_deref() {
         None => theme.accent_text,
         key => workspace_mark::tint_color(theme, key),
     };
-    // Every project mark is the same tile: one size, one radius, one hairline.
-    // A glyph sits centred on the tonal fill; a logo fills the tile edge to
-    // edge (clipped to its corners) so an app icon and a folder glyph carry
-    // the same visual weight in the list instead of a dark square beside a
-    // thin outline.
+    // Every project mark takes the same slot: one size, so names line up down
+    // the list. The slot is bare — no face, no hairline — so the mark itself
+    // is what shows: a glyph centred in it, a logo filling it (corners softly
+    // clipped, letterboxed if wide), with the sidebar's own surface behind
+    // both instead of a box around each.
     let tile = size.px(theme) + DynamicSpacing::Base08.px(theme);
     let radius = Radius::Small.px(theme);
     let frame = div()
@@ -1142,9 +1141,6 @@ fn project_icon(
         .size(tile)
         .rounded(radius)
         .overflow_hidden()
-        .bg(theme.surface_elevated)
-        .border_1()
-        .border_color(theme.hairline_subtle())
         .flex()
         .items_center()
         .justify_center();
@@ -1156,12 +1152,12 @@ fn project_icon(
         if let Some(logo) = logo {
             return frame
                 .child(
-                    // Inside the hairline; `Contain` so a wide wordmark is
-                    // letterboxed on the tile rather than cropped.
+                    // `Contain` so a wide wordmark is letterboxed in the slot
+                    // rather than cropped.
                     img(ImageSource::Image(logo.clone()))
                         .flex_none()
-                        .size(tile - BORDER_WIDTH * 2.)
-                        .rounded(radius - BORDER_WIDTH)
+                        .size(tile)
+                        .rounded(radius)
                         .object_fit(ObjectFit::Contain),
                 )
                 .into_any_element();
@@ -1544,7 +1540,6 @@ pub(crate) fn render_side_row(
                         div().id(ElementId::Name(format!("workspace-header-{label}").into())),
                         &theme,
                         NavRowHeight::Header,
-                        cursor,
                     )
                     .pl(DynamicSpacing::Base06.px(&theme))
                     .pr(DynamicSpacing::Base08.px(&theme))
@@ -1774,7 +1769,6 @@ pub(crate) fn render_side_row(
                 div().id(ElementId::Name(format!("sidebar-show-more-{label}").into())),
                 &theme,
                 NavRowHeight::Item,
-                cursor,
             )
             .pl(DynamicSpacing::Base08.px(&theme))
             .pr(DynamicSpacing::Base04.px(&theme))
@@ -1833,10 +1827,9 @@ pub(crate) fn render_side_row(
             row,
             active_path == Some(Path::new(&row.session.path)),
             this,
-            cursor,
             theme,
         ),
-        SideRow::DateSection { bucket, count } => date_section_row(*bucket, *count, cursor, &theme),
+        SideRow::DateSection { bucket, count } => date_section_row(*bucket, *count, &theme),
         SideRow::ShowLess { label } => {
             let this = this.clone();
             let label_for_click = label.clone();
@@ -1846,7 +1839,6 @@ pub(crate) fn render_side_row(
                         div().id(ElementId::Name(format!("sidebar-show-less-{label}").into())),
                         &theme,
                         NavRowHeight::Item,
-                        cursor,
                     )
                     .pl(DynamicSpacing::Base08.px(&theme))
                     .pr(DynamicSpacing::Base08.px(&theme))
@@ -2072,7 +2064,6 @@ pub(crate) fn render_side_row(
                     .debug_selector(|| "session-row-card".into()),
                 &theme,
                 NavRowHeight::Item,
-                cursor,
             )
             .group("srow")
             .relative()
@@ -4143,7 +4134,7 @@ pub(crate) fn empty_sessions_state(
             div()
                 .size(px(36.))
                 .rounded_full()
-                .bg(theme.surface_elevated)
+                .bg(theme.control_face(theme.surface_elevated))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -5898,6 +5889,20 @@ fn clamp_cursor(index: usize, count: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A project mark shows itself, not a box: its slot paints no face and no
+    /// hairline, and a logo fills the whole slot instead of sitting inside a
+    /// border.
+    #[test]
+    fn project_marks_sit_without_a_box() {
+        let source = include_str!("sidebar.rs");
+        let start = source.find("fn project_icon(").expect("project_icon");
+        let end = start + source[start..].find("\n}\n").expect("fn end");
+        let body = &source[start..end];
+        assert!(!body.contains(".bg("), "the slot paints no face");
+        assert!(!body.contains(".border_1()"), "and no hairline");
+        assert!(body.contains(".size(tile)\n"), "a logo fills the slot");
+    }
 
     struct SessionRowProbe {
         app: Entity<OrbitApp>,
