@@ -589,6 +589,23 @@ legacy app today:
 
 ### Implementation status (living)
 
+The sidebar's Git button carries a dot when there is something to look at, and
+its tooltip names what: changed files in the working tree, and issues or pull
+requests opened on GitHub since the user last viewed that tab. The Git page's
+Changes tab shows its changed-file count, and Issues / Pull requests show their
+new counts until opened (the shared `Tab` gained a quiet count badge, capped at
+99+). Local changes are counted on the branch fetch the workspace watcher
+already runs, so they cost no network. The GitHub half (`git_activity.rs`,
+`app/git_activity_ui.rs`) asks `gh` for two fields of the open lists every five
+minutes and on window activation (no more than once a minute), skips the
+user's own items, baselines a repository the first time it is seen so the
+backlog never reads as new, and keys what was seen by `owner/name` in
+`~/.orbit-pi/git-activity.json`. GitHub has no unread state, so "new" is
+"opened after the last view"; Settings → Privacy turns the check off. Covered
+by unit tests for the counting, baseline and store, and app tests for the dot,
+its tooltip and marking a tab seen; the live `gh` round trip and the dot in the
+running app are not yet verified by hand.
+
 The shared tooltip fades in on the interaction motion role; persistent update
 notice actions and their close control use the retargetable hover treatment.
 Reduce Motion presents their final appearance immediately.

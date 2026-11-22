@@ -68,6 +68,7 @@ mod gh;
 mod gh_templates;
 mod git;
 mod git_accounts;
+mod git_activity;
 mod git_ops;
 mod git_panel;
 mod hidden_models;

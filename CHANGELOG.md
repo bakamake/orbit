@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Git activity at a glance.** The Git button at the bottom of the sidebar
+  shows a dot when you have changed files, or when new issues or pull requests
+  were opened on GitHub since you last looked; hover it to see which. On the
+  Git page, the Changes tab shows how many files changed, and Issues and Pull
+  requests show how many are new until you open them. The GitHub check uses
+  your signed-in `gh`, runs every 5 minutes and when the window comes forward,
+  ignores items you opened yourself, and can be turned off in Settings →
+  Privacy → GitHub.
 - **Maximized window reopens maximized.** A window you closed while
   maximized could reopen a little short of the screen and no longer
   maximized. Orbit now waits for the maximize animation to finish before

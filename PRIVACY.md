@@ -15,6 +15,12 @@ Orbit talks to the network only for things you asked for:
   a newer version exists, and to download it if you accept.
 * **GitHub metadata** — author avatars and repository data shown in the Git and
   GitHub panels.
+* **New issues and pull requests** — while the app is open, every 5 minutes
+  and when its window comes forward, Orbit asks GitHub through your signed-in
+  `gh` for the current repository's open issues and pull requests (when each
+  was opened and by whom), to mark the sidebar's Git button when any are new
+  since you last looked. Without `gh`, a sign-in or a GitHub remote nothing is
+  asked. Turn it off in Settings → Privacy → GitHub.
 * **Starring Orbit** — the first time Settings → About opens in a launch, Orbit
   asks GitHub through your signed-in `gh` whether you have starred its
   repository; it stars or unstars only when you click the button.

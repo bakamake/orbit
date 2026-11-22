@@ -4303,13 +4303,18 @@ impl OrbitApp {
         // Git — opens (or leaves) the Git page (⌘⇧G). Lives in the footer,
         // ahead of Usage, because it is a workbench destination, not a
         // readout; the top bar keeps it in the "…" overflow.
+        // A dot marks local changes or new issues / pull requests; the tooltip
+        // names which, so the dot is never the only signal.
         let git = navigation_icon_button(
-            div().id("sidebar-git"),
+            div()
+                .id("sidebar-git")
+                .debug_selector(|| "sidebar-git".into())
+                .relative(),
             &theme,
             ButtonSize::Medium,
             self.git_open,
         )
-        .tip(commands::tooltip(CommandId::OpenGit, false))
+        .tip(self.git_nav_tooltip())
         .on_mouse_up(MouseButton::Left, cx.listener(Self::on_git_nav_click))
         .child(icon(
             "icons/sidebar-git.svg",
@@ -4319,7 +4324,24 @@ impl OrbitApp {
             } else {
                 theme.text_secondary
             },
-        ));
+        ))
+        .children(self.git_activity.any().then(|| {
+            // The Tab's unsaved dot, in the accent, on the glyph's top-right
+            // corner: inset from the button edge by the gap between the
+            // frame and its icon, so it sits on the glyph, not the frame.
+            let inset = (ButtonSize::Medium.height(&theme)
+                - ButtonSize::Medium.icon_size().px(&theme))
+                / 2.
+                - DynamicSpacing::Base02.px(&theme);
+            div()
+                .debug_selector(|| "sidebar-git-dot".into())
+                .absolute()
+                .top(inset)
+                .right(inset)
+                .size(DynamicSpacing::Base06.px(&theme))
+                .rounded_full()
+                .bg(theme.accent)
+        }));
         // Usage — opens (or leaves) the Usage page (⌘U).
         let usage = navigation_icon_button(
             div().id("sidebar-usage"),

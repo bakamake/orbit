@@ -5742,6 +5742,25 @@ impl OrbitApp {
                     ),
                 ],
             ),
+            // A background request Orbit makes on its own: say what it asks,
+            // whom, and when, and let it be turned off.
+            self.settings_section(
+                theme,
+                &tr!("settings.github_activity"),
+                vec![self.setting_row(
+                    theme,
+                    &tr!("settings.github_checks"),
+                    Some(&tr!("settings.github_checks_description")),
+                    None,
+                    Some(self.settings_toggle(
+                        "github-checks-toggle",
+                        self.git_activity_store.github_checks,
+                        theme,
+                        this.clone(),
+                        Self::toggle_github_checks,
+                    )),
+                )],
+            ),
             self.remembered_approvals_section(theme, this),
         ]
     }

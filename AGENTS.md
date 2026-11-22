@@ -132,6 +132,12 @@ crates/orbit-pi/        GPUI app — window, shell, chat, settings
   src/app/toast_ui.rs   in-app toast stack: push/dismiss helpers + the bottom-right layer
   src/app/right_dock_ui.rs  the right pane's tabs: Review + delegated subagents opened from a card
                         (strip, controller, the subagent view in the shared `dock_shell` frame)
+  src/app/git_activity_ui.rs  the sidebar Git button's GitHub half: the background `gh` check
+                        (every 5 min + window activation), marking Issues / Pull requests seen
+                        on arrival, the Settings → Privacy switch and the button's tooltip
+  src/git_activity.rs   what the Git button flags: changed files + new issues / PRs, "new" =
+                        opened after the last view, `~/.orbit-pi/git-activity.json` (switch +
+                        per-`owner/name` view times, first sight baselined)
   src/app/repo_star.rs  Settings → About's Star / Starred button: reads and toggles the user's
                         star on Orbit's repo through their signed-in `gh` (browser fallback)
   src/app/view.rs       top-level chrome: sidebar, transcript, composer, status bar, onboarding, image lightbox

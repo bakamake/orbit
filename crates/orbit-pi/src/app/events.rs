@@ -31,6 +31,8 @@ impl OrbitApp {
     }
 
     fn tick_once(&mut self, cx: &mut Context<Self>) -> bool {
+        // The sidebar Git button's GitHub half: due checks and seen marks.
+        self.tick_git_activity(cx);
         // Let a lapsed status message disappear from the status bar.
         if self
             .status_at

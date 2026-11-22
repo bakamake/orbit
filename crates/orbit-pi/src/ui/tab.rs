@@ -19,6 +19,7 @@ use crate::theme::{
     Theme,
 };
 use crate::ui::button::IconButton;
+use crate::ui::chip::{Badge, BadgeFill};
 use crate::ui::style::control::{press, ControlExt};
 
 type CloseHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -58,6 +59,7 @@ pub(crate) struct Tab {
     max_w: Pixels,
     active: bool,
     dirty: bool,
+    count: usize,
     close: Option<(ElementId, SharedString, CloseHandler)>,
 }
 
@@ -71,6 +73,7 @@ impl Tab {
             max_w: px(220.),
             active: false,
             dirty: false,
+            count: 0,
             close: None,
         }
     }
@@ -100,6 +103,13 @@ impl Tab {
     /// Unsaved changes: an accent dot after the label.
     pub(crate) fn dirty(mut self, dirty: bool) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    /// How many items the tab holds (changed files, new issues): a quiet
+    /// badge after the label. Zero shows nothing, so an empty tab stays calm.
+    pub(crate) fn count(mut self, count: usize) -> Self {
+        self.count = count;
         self
     }
 
@@ -158,6 +168,20 @@ impl Tab {
                     .text_color(ink)
                     .child(self.label),
             )
+            .children((self.count > 0).then(|| {
+                // Quiet in both states: the label already carries the tab's
+                // emphasis, the number only says how much is behind it.
+                Badge::new(
+                    count_label(self.count),
+                    if active {
+                        theme.text_secondary
+                    } else {
+                        theme.text_muted
+                    },
+                    BadgeFill::Solid(theme.overlay),
+                )
+                .render(theme)
+            }))
             .children(self.dirty.then(|| {
                 div()
                     .size(DynamicSpacing::Base06.px(theme))
@@ -178,6 +202,16 @@ impl Tab {
             ),
             None => el,
         }
+    }
+}
+
+/// A tab count as printed: past 99 the exact number stops being useful and
+/// would widen the tab, so it reads "99+".
+fn count_label(count: usize) -> String {
+    if count > 99 {
+        "99+".to_owned()
+    } else {
+        count.to_string()
     }
 }
 
@@ -223,6 +257,13 @@ mod tests {
                 "{id:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_count_caps_at_ninety_nine() {
+        assert_eq!(count_label(1), "1");
+        assert_eq!(count_label(99), "99");
+        assert_eq!(count_label(100), "99+");
     }
 
     #[test]

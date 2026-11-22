@@ -538,6 +538,25 @@ pub struct OrbitApp {
     /// Generation of the newest branch fetch; a late result from an older
     /// fetch is discarded.
     branch_fetch: u64,
+    /// What the sidebar's Git button flags: local changes (read with the
+    /// branch above) and new GitHub issues / pull requests (`git_activity_ui`).
+    git_activity: crate::git_activity::Activity,
+    /// The GitHub-check switch and what the user has seen, per repository.
+    git_activity_store: crate::git_activity::Store,
+    /// When the last GitHub check started; `None` before the first.
+    github_checked_at: Option<Instant>,
+    /// Whether a GitHub check is running (one at a time).
+    github_checking: bool,
+    /// The workspace the last check was started for; a different current
+    /// workspace makes a check due at once.
+    github_checked_for: Option<PathBuf>,
+    /// The workspace the last check resolved, with its `owner/name`.
+    github_repo: Option<(PathBuf, String)>,
+    /// The signed-in GitHub login, so the user's own items never count as new.
+    github_login: Option<String>,
+    /// The Git page's GitHub tab on the last tick, so arriving on one marks
+    /// it seen once rather than on every frame.
+    git_host_tab: Option<crate::git_activity::Kind>,
     /// Branch per listed project, for the sidebar rows' metadata line. Keyed
     /// by workspace path (the same canonical spelling the rows resolve their
     /// session's `cwd` to). A workspace that is not a git repository — or is
@@ -2530,6 +2549,14 @@ impl OrbitApp {
             workspace_logo,
             branch: None,
             branch_fetch: 0,
+            git_activity: crate::git_activity::Activity::default(),
+            git_activity_store: crate::git_activity::Store::load(),
+            github_checked_at: None,
+            github_checking: false,
+            github_checked_for: None,
+            github_repo: None,
+            github_login: None,
+            git_host_tab: None,
             sidebar_branches: HashMap::new(),
             sidebar_logos: HashMap::new(),
             sidebar_branches_for: Vec::new(),
@@ -3099,6 +3126,9 @@ impl OrbitApp {
             // values on the next frame.
             if app.window_active {
                 theme::refresh_os_display_prefs();
+                // Issues and pull requests may have arrived while the user
+                // was elsewhere; the Git button catches up on return.
+                app.check_github_on_focus(cx);
             }
         });
         // Closing the window ends the observer above on its last value — and
@@ -3433,13 +3463,18 @@ impl OrbitApp {
         };
         let row_cwd = cwd.clone();
         cx.spawn(async move |this, cx| {
-            let branch = cx
+            let (branch, changes) = cx
                 .background_executor()
                 .spawn(async move {
-                    crate::git::current_branch(&cwd).map(|name| BranchStatus {
+                    let branch = crate::git::current_branch(&cwd).map(|name| BranchStatus {
                         name,
                         ahead_behind: crate::git::ahead_behind(&cwd),
-                    })
+                    });
+                    // One porcelain line per changed path, staged or not: the
+                    // Git button's local-changes count. Not a repository (or
+                    // no git) reads as nothing changed.
+                    let changes = crate::git::status_rows(&cwd).map_or(0, |rows| rows.len());
+                    (branch, changes)
                 })
                 .await;
             let line = branch.as_ref().map(|branch| BranchLine {
@@ -3465,6 +3500,10 @@ impl OrbitApp {
                 }
                 if app.branch != branch {
                     app.branch = branch;
+                    cx.notify();
+                }
+                if app.git_activity.changes != changes {
+                    app.git_activity.changes = changes;
                     cx.notify();
                 }
             });
@@ -4719,6 +4758,7 @@ mod dialogs;
 mod events;
 pub(crate) mod format;
 mod git_accounts_ui;
+mod git_activity_ui;
 mod mcp_ui;
 mod new_task;
 mod open_in;
@@ -4781,6 +4821,8 @@ mod error_label_tests;
 mod focus_return_tests;
 #[cfg(test)]
 mod git_chip_tests;
+#[cfg(test)]
+mod git_activity_tests;
 #[cfg(test)]
 mod manage_models_tests;
 #[cfg(test)]

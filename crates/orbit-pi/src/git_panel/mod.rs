@@ -356,6 +356,11 @@ pub struct GitPanel {
     /// first load, on a workspace change, and on the manual refresh.
     gh_probed: bool,
 
+    /// Issues and pull requests opened since the user last looked, from the
+    /// app's background check (`git_activity`); the tabs show them as counts.
+    github_new_issues: usize,
+    github_new_pulls: usize,
+
     // ── issues (gh) ──
     issues: Vec<gh::GhIssue>,
     issues_loading: bool,
@@ -663,6 +668,8 @@ impl GitPanel {
             sync_menu_open: false,
             sync_menu_dismissed_at: crate::ui::popover::DismissGuard::default(),
             gh_probed: false,
+            github_new_issues: 0,
+            github_new_pulls: 0,
             issues: Vec::new(),
             issues_loading: false,
             issues_error: None,
@@ -780,6 +787,37 @@ impl GitPanel {
             self.refresh_all(cx);
         }
         cx.notify();
+    }
+
+    /// The GitHub list on screen right now, if the page is open on one. The
+    /// app marks it seen when the user arrives on it.
+    pub fn github_tab(&self) -> Option<crate::git_activity::Kind> {
+        if !self.open {
+            return None;
+        }
+        match self.tab {
+            GitTab::Issues => Some(crate::git_activity::Kind::Issues),
+            GitTab::Pulls => Some(crate::git_activity::Kind::Pulls),
+            _ => None,
+        }
+    }
+
+    /// The background check's new issue / pull request counts.
+    pub fn set_github_new(&mut self, issues: usize, pulls: usize, cx: &mut Context<Self>) {
+        if (self.github_new_issues, self.github_new_pulls) != (issues, pulls) {
+            self.github_new_issues = issues;
+            self.github_new_pulls = pulls;
+            cx.notify();
+        }
+    }
+
+    /// Changed files in the working tree: a path staged *and* edited again
+    /// is one file, not two.
+    fn changed_file_count(&self) -> usize {
+        let mut paths: std::collections::HashSet<&str> =
+            self.staged.iter().map(|row| row.path.as_str()).collect();
+        paths.extend(self.unstaged.iter().map(|row| row.path.as_str()));
+        paths.len()
     }
 
     /// The active tab's shortcut index (`0` = Changes … `5` = Pull requests).
@@ -4093,6 +4131,7 @@ impl GitPanel {
                 "git_panel.tab_pulls",
             ));
         }
+        let changed = self.changed_file_count();
         div()
             .h(DynamicSpacing::Base40.px(&theme))
             .flex_none()
@@ -4104,6 +4143,15 @@ impl GitPanel {
             .border_color(theme.hairline())
             .children(tabs.into_iter().map(|(tab, tab_icon, key)| {
                 let selected = self.tab == tab;
+                // Changes counts the working tree; the GitHub tabs count what
+                // is new since the user last opened them, so the number
+                // there clears once they look.
+                let count = match tab {
+                    GitTab::Changes => changed,
+                    GitTab::Issues if !selected => self.github_new_issues,
+                    GitTab::Pulls if !selected => self.github_new_pulls,
+                    _ => 0,
+                };
                 Tab::new(
                     gpui::ElementId::Name(format!("git-tab-{}", key.rsplit('.').next().unwrap_or(key)).into()),
                     tr!(key).to_string(),
@@ -4119,6 +4167,7 @@ impl GitPanel {
                     },
                 ))
                 .active(selected)
+                .count(count)
                 .render(&theme)
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     if this.tab != tab {
