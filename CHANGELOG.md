@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Decision cards lay their options out on a line again.** The inline "Decision needed"
+card (an extension's `select`, such as *Finish review*) and the questionnaire panel share
+`ChoiceRow`, whose label sat in a wrapping flex row with an auto basis and `min_w_0`. That
+let the label shrink to zero width, so every option painted one glyph per line ("R / e / t /
+u / r / n…") down a tall empty row. The label now takes the line's remaining width and wraps
+inside it, and the Recommended badge keeps its own width beside the first line. Covered by a
+layout test of the card's own container chain.
+
+- **The changed-files summary reads as a card again.** The end-of-task "Changed N files"
+summary with its Review button was the only transcript card on its own fill: a
+`surface_secondary` well at the wallpaper's card opacity, with no edge. In dark palettes
+that landed a shade *below* the canvas (measured 1.02:1, under the design system's 1.045:1
+visible step), so the card sank into the background. It now sits on the same inspector
+material as the tool, thought and delegation cards beside it (`frosted_transcript_fill`):
+contrast-floored over glass, the page-glass ink lift over a full-window wallpaper, and the
+`overlay` plate where it is opaque.
+
+- **Markdown images show inline.** An image in a GitHub issue or pull request body, or
+in an agent's reply, used to render as an `image · Open` card that only handed the URL to
+the browser. It now loads inline through GPUI's image cache and the same bounded HTTPS
+client avatars use (5 s connect / 15 s total timeouts, 5 redirects, an 8 MiB cap), and
+lays out at its own width — narrowed to the column and to a 30 rem height — with its
+aspect ratio kept; clicking it opens it in the browser. A skeleton bar holds its place
+while it loads, and an image that cannot load (a private attachment, a dead link, a
+plain `http://` URL) falls back to the alt text and **Open**. `file://` and `data:`
+images still never load, and a host that resolves to a private, loopback or
+link-local address is refused. This reverses the earlier rule that remote
+Markdown images are never fetched: `PRIVACY.md` now says what an image host
+can see.
+
+- **Keycaps centre their marks.** The `↵ Queue` / `⌥ ↵ Steer` hints, the sidebar's `⌘1`…
+slots, the palette hint and the working-folder key legend drew `↵`, `⌥`, `⌘`, `⌃` and `⇧`
+as text, each from whichever font covered it and at that font's own height; text layout
+centres the line box rather than the ink, so `↵` rode about 1.5px above the middle of its
+cap and above the `⌥` beside it. `kbd_key` now draws those marks with the bundled Symbols
+Nerd Font's keyboard icons, which sit on the middle of the em box. Words and letters
+(`Esc`, `Tab`, `Enter`, `B`) stay text, and the caps keep their size.
+
+- **The Subagents save button only lights up when there is something to save.** The page's
+one primary button read “Create override” whether or not the form had been touched, so
+editing a built-in (`reviewer`, `scout`, `worker`) showed an unsaved marker and no save,
+while a reopened agent offered a Save that wrote the same bytes back; the sentence
+explaining that saving a built-in writes an override sat in the File section below the
+fold. The button is now **Save** for anything with a file or a built-in behind it and
+**Create** for a draft, disabled until the form differs from what was loaded, with the
+override path in its tooltip while it is still disabled. A built-in renamed before its
+first save still says Create, because that writes a new agent rather than an override.
+
+- **Leaving Subagents with unsaved edits says where the click was going.** Clicking
+another section in the settings nav while an agent form had unsaved changes held the
+navigation and asked “Discard unsaved changes to scout?”, which never named the
+section, so the click looked dropped and the pane looked stuck; the nav cursor also
+moved to the refused row, leaving the keyboard out of step with the page on screen.
+The question now ends in *and open Providers & models?*, and the cursor stays on the
+section that is actually open until the edits are discarded.
+
+- **Two-line rows hold their caption closer to the title.** Every picker row with a
+secondary line (the model and thinking pickers, Work in, the folder picker, worktrees,
+remote hosts, the access and workflow menus, Usage filters and the palette's empty
+state) stacked its title and caption on the `Comfortable` 1.618× leading, which put
+about 8px of air between the two lines; the access and workflow menus added 2px more.
+They now stack on one token, `picker::STACK_LEADING` (`Standard`, 1.3×), with no extra
+margin, so a two-line row is 42px instead of 50px at the default size. One-line rows,
+trailing title slots and leading marks stay aligned to the title's line, and the
+row-height token they are all measured from changed with them.
+
+- **The model and thinking pickers open wholly above their chip.** In a short window the
+model picker's six-row list was taller than the room above the composer, and gpui's
+`anchored` answers a menu that does not fit by snapping it back into the window, so the
+picker slid down over its own chip and the click meant to close it landed on the picker.
+The composer now records the chip row's top edge as it lays out, and the picker caps its
+height to the room above it (less the menu gap and the window margin). Only the list gives
+way and scrolls; the search, tabs and footer keep their size, and keyboard navigation
+scrolls against the list's painted height. A cramped window still keeps a few rows.
+
+- **Tabs and sidebar row actions fade too.** Every tab — the terminal's, the right dock's
+and the Git page's — swapped its hover on one frame, because `ui/tab.rs` painted it with a
+plain `.hover` style. The tab now fades through `motion::fade`, with the same wash and the
+same muted-to-secondary ink, and callers still chain `on_click`, tooltips and debug
+selectors after `render`. A sidebar project header's `…` and `+` actions were revealed by
+`group_hover`, so they popped in while the header's wash faded. They now follow the
+header's own hover transition (`motion::follow`): no second clock, so the actions and the
+wash cannot drift a frame apart. An open header menu still holds its `…` lit, and Reduce
+Motion falls back to the one-frame reveal.
+
 - **Hovers fade across the component layer.** `motion::fade` wraps a control and still accepts
 everything a chain does after it — styling, handlers, children — because gpui's `Styled`,
 `InteractiveElement` and `StatefulInteractiveElement` each have one required hook and several

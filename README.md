@@ -51,7 +51,7 @@ summary sparkline to read that day across the whole row:
 - **Edit queued messages, or send one now** — the queue bar above the composer gives every pending steer and follow-up its own **Edit** (inline field, ⏎ saves, Esc cancels) and **Send now**, which moves that message to the front of the steering lane so pi delivers it before the next model call
 - **Workflow modes** — scope a session to **Plan**, **Build**, or **Ask**: Plan and Ask are read-only (write tools disabled, bash gated), so you can explore and plan before switching to Build
 - GPU-rendered transcript — virtualized so cost is independent of message count, with stick-to-latest streaming and coalesced commits
-- GFM markdown and syntax-highlighted code; highlighting is paint-only so streaming code blocks never reflow. Remote Markdown images stay passive — Orbit never fetches them automatically, and an explicit **Open** action opens safe HTTP(S) links in your browser
+- GFM markdown and syntax-highlighted code; highlighting is paint-only so streaming code blocks never reflow. Markdown images (issue and PR bodies, agent replies) load inline over HTTPS at their own size, scaled to the column; an image that cannot load shows its alt text and an **Open** action for the browser
 - **Mermaid flowcharts drawn natively** — a `flowchart`/`graph` fence paints as a real diagram
   (GPUI paths and text, no webview), `subgraph` groups included, with the copyable source one
   click away; every other Mermaid diagram type keeps the honest source block instead of a fake

@@ -2,7 +2,9 @@
 //! truncating label, an optional unsaved dot and a close button.
 //!
 //! The tab owns its look in both states — the active fill and primary ink,
-//! the resting muted ink and quiet hover, the press — and its density, which
+//! the resting muted ink and quiet hover (faded through `motion::fade`, so a
+//! strip of tabs reads like every other control under the pointer), the
+//! press — and its density, which
 //! follows its [`ButtonSize`]. The caller owns what the tab is (glyph, label,
 //! localized close tooltip), what selecting it does (`on_click` on the returned
 //! element) and what closing it does. [`tab_strip`] owns the row: one line,
@@ -20,7 +22,8 @@ use crate::theme::{
 };
 use crate::ui::button::IconButton;
 use crate::ui::chip::{Badge, BadgeFill};
-use crate::ui::style::control::{press, ControlExt};
+use crate::motion::{Hover, Hovered};
+use crate::ui::style::control::press;
 
 type CloseHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -127,8 +130,14 @@ impl Tab {
     }
 
     /// The tab; the caller attaches `on_click` (select) and any tooltip.
-    pub(crate) fn render(self, theme: &Theme) -> Stateful<gpui::Div> {
+    ///
+    /// The returned [`Hovered`] still takes every handler and style call a
+    /// plain `Stateful<Div>` would, so callers chain after it unchanged.
+    pub(crate) fn render(self, theme: &Theme) -> Hovered<Stateful<gpui::Div>> {
         let active = self.active;
+        // The fade's key: stable per tab and namespaced, so a strip's tab
+        // ids cannot collide with another surface's transition names.
+        let fade_name: SharedString = format!("tab:{}", self.id).into();
         let (padding, gap) = density(self.size, theme);
         let ink = if active {
             theme.text_primary
@@ -149,12 +158,17 @@ impl Tab {
             .rounded(button::RADIUS.px(theme))
             .cursor_pointer()
             .text_size(TextSize::Small.px(theme));
-        el = if active {
-            el.bg(theme.pressed_wash())
+        // The open tab is already lit, so it has nothing to fade to; a
+        // resting one fades in the quiet hover — the wash, and its inherited
+        // ink lifting from muted to secondary.
+        let hover = if active {
+            el = el.bg(theme.pressed_wash());
+            Hover::none()
         } else {
-            el.text_color(theme.text_muted).hover_quiet(theme)
+            el = el.text_color(theme.text_muted);
+            Hover::wash(theme).with_ink(theme.text_muted, theme.text_secondary)
         };
-        let el = press(el)
+        let el = crate::motion::fade(press(el), fade_name, theme, hover)
             .children(self.glyph)
             .child(
                 div()
@@ -257,6 +271,44 @@ mod tests {
                 "{id:?}"
             );
         }
+    }
+
+    /// A resting tab fades its hover on the shared layer instead of swapping
+    /// it on one frame, keyed by its own id.
+    #[gpui::test]
+    fn a_resting_tab_fades_its_hover(cx: &mut gpui::TestAppContext) {
+        use crate::motion::registry::Transitions;
+        use gpui::{point, Modifiers};
+
+        struct Probe(Theme);
+
+        impl gpui::Render for Probe {
+            fn render(
+                &mut self,
+                _: &mut gpui::Window,
+                _: &mut gpui::Context<Self>,
+            ) -> impl IntoElement {
+                div().w_full().h_full().pt(px(200.0)).child(
+                    Tab::new("tab-probe", "main.rs")
+                        .render(&self.0)
+                        .debug_selector(|| "tab-probe".into())
+                        // Callers still chain handlers after `render`.
+                        .on_click(|_, _, _| {}),
+                )
+            }
+        }
+
+        let (_probe, cx) = cx.add_window_view(|_, _| Probe(Theme::dark()));
+        cx.update(|window, cx| window.draw(cx).clear());
+        let tab = cx.debug_bounds("tab-probe").expect("the tab lays out");
+        cx.simulate_mouse_move(tab.center(), None, Modifiers::none());
+        cx.update(|window, cx| window.draw(cx).clear());
+        let hovered = Transitions::get("tab:tab-probe").expect("the hover is tracked");
+        assert_eq!(hovered.to(), 1.0);
+
+        cx.simulate_mouse_move(point(px(600.0), px(10.0)), None, Modifiers::none());
+        cx.update(|window, cx| window.draw(cx).clear());
+        assert_eq!(Transitions::get("tab:tab-probe").map(|t| t.to()), Some(0.0));
     }
 
     #[test]

@@ -532,8 +532,10 @@ same trusted workspace. Cross-workspace children use `--no-approve`, drop the ex
 secret-name set, and re-apply Orbit-owned guardrail variables after secret removal. Plan/Ask
 use conservative per-utility shell policies and default-deny MCP, custom, and orchestration
 tools; invalid workflow evidence falls through to the session branch instead of becoming
-Build. Remote Markdown images are passive browser links rather than automatic requests;
-the remaining avatar client uses HTTPS, timeouts, bounded redirects, and an 8 MiB body cap.
+Build. Remote Markdown images load inline through the same bounded client avatars use
+(HTTPS only, timeouts, bounded redirects, an 8 MiB body cap); this revises the earlier
+passive-link rule at the user's request (2026-11-23), and `PRIVACY.md` says what an image
+host can see.
 Updater verification consumes the same open file it verified, scratch directories are
 owner-only, feed/error writes are bounded and non-following, clone URLs lose userinfo and
 query credentials, and quota adapters require exact official HTTPS origins.
@@ -635,9 +637,27 @@ by unit tests for the counting, baseline and store, and app tests for the dot,
 its tooltip and marking a tab seen; the live `gh` round trip and the dot in the
 running app are not yet verified by hand.
 
+Markdown images render inline (`transcript_view::render_markdown_image`): an HTTPS
+image loads through GPUI's image cache and the bounded `http.rs` client, records its
+decoded size, and lays out at its own width narrowed to the column and to a 30 rem
+height, keeping its aspect ratio; a click opens it in the browser. While it loads a
+skeleton bar holds its place; a failed load (a private attachment, a dead link, a
+plain `http://` URL) falls back to the alt text and an **Open** action. `file://` and
+`data:` images never load. This revises the earlier passive-image rule; PDF export
+still omits remote images. Covered by layout tests for inline, wide, quoted and
+failing images; not yet verified by hand in the running app.
+
 The shared tooltip fades in on the interaction motion role; persistent update
 notice actions and their close control use the retargetable hover treatment.
 Reduce Motion presents their final appearance immediately.
+
+Tabs (terminal, right dock, Git page) fade their resting hover through
+`motion::fade` from the one `ui/tab.rs` owner. A sidebar project header's `…`
+and `+` actions fade in with the header's own wash through `motion::follow`,
+which reads the parent's hover transition instead of keeping a second clock;
+under Reduce Motion they fall back to `group_hover` and appear on one frame.
+Covered by motion and tab unit tests; the fade in the running app is not yet
+verified by hand.
 
 Project trust (D23) now gates every local, remote, MCP, plugin, and delegated pi
 spawn. Unknown workspaces run restricted with no project resources or MCP secrets;
@@ -878,7 +898,11 @@ tier (which writes the `tools:` line and derives the child's ceiling), the workf
 the thinking level, the description and the prompt. Saves are surgical — only the five keys Orbit
 owns change, and a file edited elsewhere is never clobbered without an explicit overwrite; a user
 agent can be created, duplicated, renamed, disabled, deleted (Undo restores the exact bytes) and
-reset to builtin. A child's side-pane tab is its live transcript (D24): the child's own pi
+reset to builtin. A builtin has no file of its own, so saving one writes the user override that
+takes precedence; the form's primary button says Create for a draft and Save for anything that
+already has a file, stays disabled until the form differs from what was loaded, and carries the
+override path in its tooltip. Leaving the page or switching settings sections with unsaved edits
+holds the navigation and names the destination it was going to before the edits are dropped. A child's side-pane tab is its live transcript (D24): the child's own pi
 events, read from the extension's event log and painted with the chat's rows, under a one-line
 status (state mark, status, elapsed); each tab wears the child's state mark, and two tabs for the
 same agent are numbered. Without a readable local log the tab keeps the summary panel. Covered by

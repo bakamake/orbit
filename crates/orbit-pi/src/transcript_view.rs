@@ -9758,9 +9758,155 @@ fn render_block(
     }
 }
 
-/// Markdown-linked images never fetch remote content. The quiet fallback
-/// keeps the alt text visible, and only an explicit Open action hands a safe
-/// HTTP(S) URL to the browser.
+/// The tallest an inline Markdown image paints at the default UI size before it
+/// scales down, so one tall screenshot cannot push a whole message off screen.
+const MARKDOWN_IMAGE_MAX_H_REMS: f32 = 30.;
+/// The loading bar's height while a remote image's size is not known yet.
+const MARKDOWN_IMAGE_LOADING_H_REMS: f32 = 6.;
+
+thread_local! {
+    /// Natural sizes of remote Markdown images, recorded by the image source
+    /// once GPUI's loader has decoded them. Layout needs the size up front:
+    /// a GPUI `img` left at an auto size paints at its pixel size, and a
+    /// `max_w` then squeezes the box without keeping its aspect ratio.
+    static MARKDOWN_IMAGE_SIZES: RefCell<HashMap<SharedString, gpui::Size<Pixels>>> =
+        RefCell::new(HashMap::new());
+    /// The decoded bitmaps behind those sizes. GPUI's asset cache keeps every
+    /// image it has ever decoded for the life of the process, and a long
+    /// visual-debug transcript of full-size screenshots is gigabytes; holding
+    /// the bitmap here is what lets an old one be released.
+    static MARKDOWN_IMAGE_BITMAPS: RefCell<MarkdownImageBitmaps> =
+        RefCell::new(MarkdownImageBitmaps::default());
+}
+
+/// How much decoded Markdown imagery stays resident — roughly eight 2560px
+/// screenshots — before the ones that scrolled away are let go.
+const MARKDOWN_IMAGE_BITMAP_BUDGET: usize = 128 * 1024 * 1024;
+/// How recently an image must have been painted to be safe from release.
+/// Every image in the frame that is drawing is painted *now*; one that has not
+/// been painted for this long is off screen.
+const MARKDOWN_IMAGE_RELEASE_AGE: Duration = Duration::from_secs(2);
+
+/// The decoded Markdown images in use, least recently painted first, so the
+/// ones no longer on screen can be dropped once the budget is passed.
+struct MarkdownImageBitmaps {
+    entries: HashMap<SharedString, RetainedBitmap>,
+    byte_budget: usize,
+    bytes: usize,
+}
+
+impl Default for MarkdownImageBitmaps {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            byte_budget: MARKDOWN_IMAGE_BITMAP_BUDGET,
+            bytes: 0,
+        }
+    }
+}
+
+struct RetainedBitmap {
+    image: Arc<gpui::RenderImage>,
+    bytes: usize,
+    used: Instant,
+}
+
+impl MarkdownImageBitmaps {
+    /// Record the bitmap behind `url`, returning the ones that fell out of the
+    /// budget with the URL each was fetched for.
+    fn retain(
+        &mut self,
+        url: SharedString,
+        image: Arc<gpui::RenderImage>,
+    ) -> Vec<(SharedString, Arc<gpui::RenderImage>)> {
+        let now = Instant::now();
+        // Frame 0 stands for the image: an animated one is small either way.
+        let bytes = image.as_bytes(0).map_or(0, <[u8]>::len);
+        let entry = RetainedBitmap {
+            image,
+            bytes,
+            used: now,
+        };
+        match self.entries.insert(url, entry) {
+            Some(previous) => self.bytes = self.bytes - previous.bytes + bytes,
+            None => self.bytes += bytes,
+        }
+        let mut released = Vec::new();
+        while self.bytes > self.byte_budget {
+            let oldest = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(url, entry)| (url.clone(), entry.used));
+            let Some((url, used)) = oldest else { break };
+            // A transcript whose *visible* images alone exceed the budget
+            // stops here rather than reloading them frame after frame.
+            if now.saturating_duration_since(used) < MARKDOWN_IMAGE_RELEASE_AGE {
+                break;
+            }
+            if let Some(entry) = self.entries.remove(&url) {
+                self.bytes -= entry.bytes;
+                released.push((url, entry.image));
+            }
+        }
+        released
+    }
+}
+
+/// The natural size of a remote Markdown image, once it has loaded.
+fn markdown_image_size(url: &str) -> Option<gpui::Size<Pixels>> {
+    MARKDOWN_IMAGE_SIZES.with(|sizes| sizes.borrow().get(url).copied())
+}
+
+/// A remote image loaded through GPUI's own image cache (and the app's bounded
+/// HTTPS client), recording the decoded size the first time it is known and
+/// asking for one more frame so the layout can take it. Every load also hands
+/// the bitmap to the bounded retention set, which releases the ones that
+/// scrolled away.
+fn markdown_image_source(url: SharedString) -> ImageSource {
+    ImageSource::Custom(Arc::new(move |window, cx| {
+        let resource = gpui::Resource::Uri(gpui::SharedUri::from(url.to_string()));
+        let result = window.use_asset::<gpui::ImgResourceLoader>(&resource, cx)?;
+        if let Ok(image) = &result {
+            let size = image.size(0);
+            let size = gpui::size(px(size.width.0 as f32), px(size.height.0 as f32));
+            let fresh = MARKDOWN_IMAGE_SIZES
+                .with(|sizes| sizes.borrow_mut().insert(url.clone(), size).is_none());
+            let released = MARKDOWN_IMAGE_BITMAPS
+                .with(|bitmaps| bitmaps.borrow_mut().retain(url.clone(), image.clone()));
+            for (released_url, released_image) in released {
+                let resource = gpui::Resource::Uri(gpui::SharedUri::from(released_url.to_string()));
+                cx.remove_asset::<gpui::ImgResourceLoader>(&resource);
+                let _ = window.drop_image(released_image);
+            }
+            if fresh {
+                // `refresh` is a no-op while the frame is drawing, which is when
+                // the loader runs: ask for the next frame by name.
+                window.request_animation_frame();
+            }
+        }
+        Some(result)
+    }))
+}
+
+/// The box an image of `natural` size takes: its own width, narrowed to the
+/// column and to the width at which it reaches `max_h`; the height follows the
+/// aspect ratio. Pure, so the arithmetic is tested without a window.
+fn markdown_image_max_w(natural: gpui::Size<Pixels>, max_h: Pixels) -> Option<(Pixels, f32)> {
+    let (w, h) = (f32::from(natural.width), f32::from(natural.height));
+    if w <= 0. || h <= 0. {
+        return None;
+    }
+    let ratio = w / h;
+    Some((px(w.min(f32::from(max_h) * ratio)), ratio))
+}
+
+/// A Markdown image, inline. HTTPS images load through the app's bounded
+/// client and paint at their own size, narrowed to the column and to a maximum
+/// height; a click opens the image in the browser. While it loads a quiet bar
+/// holds its place; if it cannot load (a private attachment, a dead link, a
+/// non-HTTPS URL) the alt text and an explicit Open action take its place.
+/// Local-file and data URLs never load and never open.
 fn render_markdown_image(
     alt: &str,
     url: &str,
@@ -9771,26 +9917,85 @@ fn render_markdown_image(
     theme: Theme,
 ) -> impl IntoElement {
     let open_selector = format!("markdown-image-open-{ix}-{id_namespace}-{block_ix}-{sub}");
-    let open = markdown_image_open_url(url).map(|url| {
-        div()
-            .flex_none()
-            .debug_selector(move || open_selector)
-            .child(
-                crate::ui::button::LinkButton::new(
-                    md_id(ix, id_namespace, block_ix, sub),
-                    tr!("explorer.open"),
-                )
-                .external()
-                .size(TextSize::Small)
-                .on_click(&theme, move |_, _, cx| cx.open_url(&url)),
-            )
-            .into_any_element()
-    });
-    div()
+    let open_url = markdown_image_open_url(url);
+    let open_action = {
+        let open_url = open_url.clone();
+        move || {
+            open_url.clone().map(|url| {
+                let selector = open_selector.clone();
+                div()
+                    .flex_none()
+                    .debug_selector(move || selector.clone())
+                    .child(
+                        crate::ui::button::LinkButton::new(
+                            md_id(ix, id_namespace, block_ix, sub),
+                            tr!("explorer.open"),
+                        )
+                        .external()
+                        .size(TextSize::Small)
+                        .on_click(&theme, move |_, _, cx| {
+                            // Nested in the image's own frame: one open, not two.
+                            cx.stop_propagation();
+                            cx.open_url(&url);
+                        }),
+                    )
+                    .into_any_element()
+            })
+        }
+    };
+    let column = div()
         .w_full()
         .min_w_0()
         .flex()
-        .child(markdown_image_fallback(alt, open, theme))
+        .flex_col()
+        // Not stretched: an image narrower than the column keeps its width.
+        .items_start();
+    let Some(url) = open_url else {
+        return column.child(markdown_image_fallback(alt, open_action(), theme));
+    };
+
+    let alt = alt.to_string();
+    let image_selector = format!("markdown-image-{ix}-{id_namespace}-{block_ix}-{sub}");
+    let loading_h = theme.rems(MARKDOWN_IMAGE_LOADING_H_REMS);
+    let image = img(markdown_image_source(SharedString::from(url.clone())))
+        .size_full()
+        .object_fit(ObjectFit::Contain)
+        .rounded(panel::RADIUS.px(&theme))
+        .with_loading(move || {
+            crate::ui::feedback::skeleton_bar(px(0.), loading_h, &theme)
+                .w_full()
+                .into_any_element()
+        })
+        .with_fallback({
+            let alt = alt.clone();
+            move || markdown_image_fallback(&alt, open_action(), theme)
+        });
+    let open_url = url.clone();
+    let frame = div()
+        .id(SharedString::from(image_selector.clone()))
+        .debug_selector(move || image_selector.clone())
+        .w_full()
+        .cursor_pointer()
+        .tip(if alt.trim().is_empty() {
+            tr!("explorer.open")
+        } else {
+            alt.clone()
+        })
+        .on_click(move |_, _, cx| cx.open_url(&open_url));
+    let frame = match markdown_image_size(&url)
+        .and_then(|natural| markdown_image_max_w(natural, theme.rems(MARKDOWN_IMAGE_MAX_H_REMS)))
+    {
+        Some((max_w, ratio)) => {
+            let mut frame = frame.max_w(max_w);
+            // The height follows the width through the image's own ratio.
+            frame.style().aspect_ratio = Some(ratio);
+            frame
+        }
+        // Not loaded yet (or it failed): no box of our own, so the loading
+        // bar and the fallback card size themselves.
+        None => frame,
+    };
+    column.child(frame.child(image))
 }
 
 /// Normalize the URL handed to the OS opener, rejecting malformed targets and
@@ -10762,10 +10967,21 @@ fn workspace_relative_path(path: &str, workspace: Option<&Path>) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-/// End-of-task changed-files summary: a borderless tonal well
-/// (`surface_secondary`, frosted on glass) — no hairline, no icon tile — with
-/// one header line ("Changed N files +a −d" and a Review chip) and roomy file
-/// rows. Shows 3 rows; expanded shows up to 12 with a clip note.
+/// The changed-files summary's surface: the transcript's inspector card, on
+/// the same [`frosted_transcript_fill`] as the tool, thought and delegation
+/// cards beside it. It used to be a `surface_secondary` well at the
+/// wallpaper's card opacity, which in dark palettes landed a shade *below* the
+/// canvas (1.02:1) and vanished; the inspector fill has a contrast floor over
+/// glass and the `overlay` plate where it is opaque, so it reads as a card
+/// everywhere the others do.
+fn changed_files_surface(el: gpui::Div, theme: Theme) -> gpui::Div {
+    el.inspector_card(&theme, frosted_transcript_fill(theme))
+}
+
+/// End-of-task changed-files summary: an inspector card
+/// ([`changed_files_surface`]) — no hairline, no icon tile — with one header
+/// line ("Changed N files +a −d" and a Review chip) and roomy file rows. Shows
+/// 3 rows; expanded shows up to 12 with a clip note.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_changed_files(
     files: &[ChangedFile],
@@ -10907,19 +11123,16 @@ pub(crate) fn render_changed_files(
         header = header.child(review);
     }
 
-    // A tonal well, not a framed card: the edge is transparent (the frost
-    // still applies on glass) and `surface_secondary` alone sets it apart
-    // from the transcript canvas.
-    let mut card = div()
-        .debug_selector(move || format!("changed-files-{message_ix}"))
-        .w_full()
-        .min_w_0()
-        .card_surface(
-            &theme,
-            gpui::transparent_black(),
-            theme.card_fill(theme.surface_secondary),
-        )
-        .overflow_hidden()
+    // The transcript's card material, so the summary reads as a card beside
+    // the tool cards rather than a well sunk into the canvas.
+    let mut card = changed_files_surface(
+        div()
+            .debug_selector(move || format!("changed-files-{message_ix}"))
+            .w_full()
+            .min_w_0(),
+        theme,
+    )
+    .overflow_hidden()
         .child(header)
         .child(rows);
 
@@ -11910,6 +12123,53 @@ mod tests {
             generation_tps(&no_output, Some(Duration::from_secs(3))),
             None
         );
+    }
+
+    /// The changed-files summary sits on the same material as the transcript's
+    /// other cards in every wallpaper treatment, and with no wallpaper it is a
+    /// visible step off the canvas: the `surface_secondary` well it replaced
+    /// was 1.02:1, darker than the canvas, in dark palettes.
+    #[test]
+    fn changed_files_card_is_the_transcript_card_material() {
+        for base in [Theme::dark(), Theme::light()] {
+            for (active, glass) in [(false, false), (false, true), (true, false), (true, true)] {
+                let theme = base.with_wallpaper(theme::SurfaceTreatment {
+                    active,
+                    glass,
+                    card_alpha: 0.8,
+                    ..theme::SurfaceTreatment::OPAQUE
+                });
+                let mut card = changed_files_surface(div(), theme);
+                assert_eq!(
+                    card.style().background,
+                    Some(frosted_transcript_fill(theme).into()),
+                    "{:?} active {active} glass {glass}",
+                    theme.mode
+                );
+            }
+        }
+        // Opaque, no wallpaper: the card's plate lifts it off the canvas
+        // instead of sinking below it.
+        for id in theme::ThemeId::ALL {
+            let theme = Theme::for_id(id).with_wallpaper(theme::SurfaceTreatment::OPAQUE);
+            if theme.floating_glass_sigma().is_some() {
+                continue;
+            }
+            let plate = frosted_transcript_fill(theme);
+            let (canvas, ink) = (theme.background.to_rgb(), plate.to_rgb());
+            let a = plate.a;
+            let card = [
+                ink.r * a + canvas.r * (1. - a),
+                ink.g * a + canvas.g * (1. - a),
+                ink.b * a + canvas.b * (1. - a),
+            ];
+            let ratio =
+                crate::wallpaper::contrast_ratio(card, [canvas.r, canvas.g, canvas.b]);
+            assert!(
+                ratio >= 1.045,
+                "{id:?}: the card must be a visible step off the canvas, got {ratio:.3}"
+            );
+        }
     }
 
     #[test]
@@ -16654,131 +16914,235 @@ mod tests {
         );
     }
 
-    /// Markdown images are passive content: painting one never asks GPUI's
-    /// image loader for the URL. HTTP(S) gets a separate Open action; a local
-    /// file URL stays noninteractive.
-    #[gpui::test]
-    fn markdown_images_never_fetch_and_only_safe_urls_open(cx: &mut gpui::TestAppContext) {
-        let cx = cx.add_empty_window();
-        let requested = Arc::new(std::sync::Mutex::new(Vec::new()));
-        cx.update(|_, cx| {
-            cx.set_global(theme::Theme::for_id(theme::ThemeId::Orbit));
-            cx.set_http_client(Arc::new(PngHttpClient {
-                requested: requested.clone(),
-            }));
-        });
+    /// An HTTP client that answers every request with 404, for the image
+    /// fallback: a private attachment or a dead link.
+    struct NotFoundHttpClient {
+        requested: Arc<std::sync::Mutex<Vec<String>>>,
+    }
 
-        struct ImageDocView;
-        impl gpui::Render for ImageDocView {
+    impl gpui::http_client::HttpClient for NotFoundHttpClient {
+        fn type_name(&self) -> &'static str {
+            "NotFoundHttpClient"
+        }
+
+        fn user_agent(&self) -> Option<&gpui::http_client::http::HeaderValue> {
+            None
+        }
+
+        fn proxy(&self) -> Option<&gpui::http_client::Url> {
+            None
+        }
+
+        fn send(
+            &self,
+            request: gpui::http_client::Request<gpui::http_client::AsyncBody>,
+        ) -> futures::future::BoxFuture<
+            'static,
+            anyhow::Result<gpui::http_client::Response<gpui::http_client::AsyncBody>>,
+        > {
+            self.requested
+                .lock()
+                .expect("request log is not poisoned")
+                .push(request.uri().to_string());
+            Box::pin(async move {
+                Ok(gpui::http_client::Response::builder()
+                    .status(404)
+                    .body(gpui::http_client::AsyncBody::from(Vec::new()))
+                    .expect("build the 404 response"))
+            })
+        }
+    }
+
+    /// Paint `markdown` in a `width`-wide column until its images settle.
+    fn paint_markdown_doc<'a>(
+        cx: &'a mut gpui::TestAppContext,
+        client: Arc<dyn gpui::http_client::HttpClient>,
+        markdown: &'static str,
+        width: f32,
+    ) -> &'a mut gpui::VisualTestContext {
+        struct DocView(&'static str, f32);
+        impl gpui::Render for DocView {
             fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
                 div()
                     .id("image-doc")
-                    .w(px(300.))
+                    .w(px(self.1))
                     .debug_selector(|| "image-doc".to_string())
                     .child(render_markdown_document(
-                        "<img alt=\"remote\" src=\"https://example.com/shot.png\" />\n\n<img alt=\"local\" src=\"file:///tmp/shot.png\" />",
+                        self.0,
                         theme::Theme::for_id(theme::ThemeId::Orbit),
                     ))
             }
         }
 
-        let view = cx.update(|_, cx| cx.new(|_| ImageDocView));
-        let paint = |cx: &mut gpui::VisualTestContext| {
+        let cx = cx.add_empty_window();
+        cx.update(|_, cx| {
+            cx.set_global(theme::Theme::for_id(theme::ThemeId::Orbit));
+            cx.set_http_client(client);
+        });
+        let view = cx.update(|_, cx| cx.new(|_| DocView(markdown, width)));
+        for _ in 0..4 {
             let view = view.clone();
             cx.draw(
                 point(px(0.), px(0.)),
-                gpui::size(px(500.), px(300.)),
+                gpui::size(px(width + 200.), px(600.)),
                 move |_, _| view.clone(),
             );
-        };
-        paint(cx);
-        cx.run_until_parked();
-        paint(cx);
-        cx.run_until_parked();
-        paint(cx);
+            cx.run_until_parked();
+        }
+        cx
+    }
 
-        assert!(
-            requested
-                .lock()
-                .expect("request log is not poisoned")
-                .is_empty(),
-            "rendering markdown must not construct an image request"
+    /// Remote Markdown images load inline, at their own size and aspect ratio;
+    /// a local file URL never loads and never opens.
+    #[gpui::test]
+    fn markdown_images_load_inline_and_local_files_stay_passive(cx: &mut gpui::TestAppContext) {
+        let requested = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let cx = paint_markdown_doc(
+            cx,
+            Arc::new(PngHttpClient {
+                requested: requested.clone(),
+            }),
+            "<img alt=\"remote\" src=\"https://example.com/inline-shot.png\" />\n\n<img alt=\"local\" src=\"file:///tmp/shot.png\" />",
+            300.,
         );
-        assert!(cx.debug_bounds("image-doc").is_some());
-        assert!(
-            cx.debug_bounds("markdown-image-open-0-0-1-0")
-                .is_none(),
-            "a file URL has no Open action"
-        );
-        let open = cx
-            .debug_bounds("markdown-image-open-0-0-0-0")
-            .expect("an HTTPS image has an explicit Open action");
-        assert!(open.size.width > px(0.) && open.size.height > px(0.), "the Open action has a hit area: {open:?}");
+
         assert_eq!(
-            markdown_image_open_url("https://example.com/shot.png").as_deref(),
-            Some("https://example.com/shot.png")
+            requested.lock().expect("request log is not poisoned").as_slice(),
+            ["https://example.com/inline-shot.png"],
+            "only the HTTPS image is requested"
+        );
+        let image = cx
+            .debug_bounds("markdown-image-0-0-0-0")
+            .expect("the HTTPS image paints inline");
+        // The fixture is 200×100: narrower than the column, so it keeps its
+        // own width, and its height follows the 2:1 ratio.
+        assert_eq!(image.size.width, px(200.));
+        assert_eq!(image.size.height, px(100.));
+        assert!(
+            cx.debug_bounds("markdown-image-open-0-0-0-0").is_none(),
+            "a loaded image is the content, not a link card"
+        );
+        assert!(cx.debug_bounds("markdown-image-0-0-1-0").is_none());
+        assert!(
+            cx.debug_bounds("markdown-image-open-0-0-1-0").is_none(),
+            "a file URL has no Open action"
         );
         assert!(markdown_image_open_url("file:///tmp/shot.png").is_none());
     }
 
-    /// URL normalization still applies to the explicit browser action for a
-    /// quoted GitHub screenshot, but neither the signed nor the durable asset
-    /// URL is fetched while the reply renders.
+    /// An image wider than its column scales down to the column and keeps its
+    /// aspect ratio rather than squeezing the box.
     #[gpui::test]
-    fn quoted_reply_image_opens_the_durable_asset_without_fetching(
-        cx: &mut gpui::TestAppContext,
-    ) {
-        let cx = cx.add_empty_window();
+    fn a_wide_markdown_image_fits_its_column(cx: &mut gpui::TestAppContext) {
+        let cx = paint_markdown_doc(
+            cx,
+            Arc::new(PngHttpClient {
+                requested: Arc::default(),
+            }),
+            "![wide](https://example.com/wide-shot.png)",
+            120.,
+        );
+        let image = cx
+            .debug_bounds("markdown-image-0-0-0-0")
+            .expect("the image paints inline");
+        assert_eq!(image.size.width, px(120.));
+        assert_eq!(image.size.height, px(60.));
+    }
+
+    /// A quoted GitHub screenshot loads from its durable asset URL, not the
+    /// expired signed one.
+    #[gpui::test]
+    fn quoted_reply_image_loads_the_durable_asset(cx: &mut gpui::TestAppContext) {
         let requested = Arc::new(std::sync::Mutex::new(Vec::new()));
-        cx.update(|_, cx| {
-            cx.set_global(theme::Theme::for_id(theme::ThemeId::Orbit));
-            cx.set_http_client(Arc::new(PngHttpClient {
+        let cx = paint_markdown_doc(
+            cx,
+            Arc::new(PngHttpClient {
                 requested: requested.clone(),
-            }));
-        });
-
-        struct ReplyDocView;
-        impl gpui::Render for ReplyDocView {
-            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
-                div().id("reply-doc").w(px(240.)).child(render_markdown_document(
-                    "> ### What happened?\n> <img alt=\"Image\" width=\"1450\" height=\"932\" src=\"https://private-user-images.githubusercontent.com/74659438/656345150-69f721c8-e025-44cd-8242-4e87eef54f7e.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.expired\">\n> ### Steps to reproduce\n> 1. Open OrbitPI on windows\n",
-                    theme::Theme::for_id(theme::ThemeId::Orbit),
-                ))
-            }
-        }
-
-        let view = cx.update(|_, cx| cx.new(|_| ReplyDocView));
-        let paint = |cx: &mut gpui::VisualTestContext| {
-            let view = view.clone();
-            cx.draw(
-                point(px(0.), px(0.)),
-                gpui::size(px(300.), px(300.)),
-                move |_, _| view.clone(),
-            );
-        };
-        paint(cx);
-        cx.run_until_parked();
-        paint(cx);
-        cx.run_until_parked();
-        paint(cx);
-
-        assert!(
-            requested
-                .lock()
-                .expect("request log is not poisoned")
-                .is_empty(),
-            "the quoted reply must not fetch either asset URL"
+            }),
+            "> ### What happened?\n> <img alt=\"Image\" width=\"1450\" height=\"932\" src=\"https://private-user-images.githubusercontent.com/74659438/656345150-69f721c8-e025-44cd-8242-4e87eef54f7e.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.expired\">\n> ### Steps to reproduce\n> 1. Open OrbitPI on windows\n",
+            240.,
         );
-        let open = cx
-            .debug_bounds("markdown-image-open-0-0-0-1")
-            .expect("the normalized durable URL has an Open action");
-        assert!(open.size.width > px(0.) && open.size.height > px(0.));
         assert_eq!(
-            markdown_image_open_url(&normalize_image_url("https://private-user-images.githubusercontent.com/74659438/656345150-69f721c8-e025-44cd-8242-4e87eef54f7e.png?jwt=expired")).as_deref(),
-            Some(
-                "https://github.com/user-attachments/assets/69f721c8-e025-44cd-8242-4e87eef54f7e"
-            )
+            requested.lock().expect("request log is not poisoned").as_slice(),
+            ["https://github.com/user-attachments/assets/69f721c8-e025-44cd-8242-4e87eef54f7e"],
+            "the durable asset is requested, never the expired signed URL"
         );
+        assert!(cx.debug_bounds("markdown-image-0-0-0-1").is_some());
+    }
+
+    /// An image that cannot load (a private attachment, a dead link) shows its
+    /// alt text and an explicit Open action instead.
+    #[gpui::test]
+    fn an_image_that_cannot_load_falls_back_to_open(cx: &mut gpui::TestAppContext) {
+        let requested = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let cx = paint_markdown_doc(
+            cx,
+            Arc::new(NotFoundHttpClient {
+                requested: requested.clone(),
+            }),
+            "![shot](https://example.com/missing-shot.png)",
+            300.,
+        );
+        assert_eq!(requested.lock().expect("request log is not poisoned").len(), 1);
+        let open = cx
+            .debug_bounds("markdown-image-open-0-0-0-0")
+            .expect("a failed image offers Open");
+        assert!(open.size.width > px(0.) && open.size.height > px(0.));
+    }
+
+    /// The box arithmetic: an image keeps its own width up to the height cap,
+    /// and the ratio carries the height.
+    #[test]
+    fn markdown_image_width_follows_the_height_cap() {
+        let max_h = px(480.);
+        assert_eq!(
+            markdown_image_max_w(gpui::size(px(200.), px(100.)), max_h),
+            Some((px(200.), 2.))
+        );
+        assert_eq!(
+            markdown_image_max_w(gpui::size(px(2560.), px(1600.)), max_h),
+            Some((px(768.), 1.6))
+        );
+        assert_eq!(
+            markdown_image_max_w(gpui::size(px(1000.), px(5000.)), max_h),
+            Some((px(96.), 0.2))
+        );
+        assert_eq!(markdown_image_max_w(gpui::size(px(0.), px(10.)), max_h), None);
+    }
+
+    /// GPUI's asset cache never evicts, so the transcript holds each decoded
+    /// bitmap only until the budget pushes the least recently painted one out
+    /// — and never one the current frame is still drawing.
+    #[test]
+    fn decoded_markdown_images_are_released_oldest_first() {
+        // A 4×4 RGBA frame is 64 bytes, so a 100-byte budget holds one.
+        let bitmap = |edge: u32| {
+            Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+                image::RgbaImage::new(edge, edge),
+            )]))
+        };
+        let mut bitmaps = MarkdownImageBitmaps {
+            byte_budget: 100,
+            ..Default::default()
+        };
+        assert!(bitmaps.retain("a".into(), bitmap(4)).is_empty());
+        // `a` scrolled away a while ago; `b` needs the room.
+        bitmaps.entries.get_mut("a").expect("recorded").used =
+            Instant::now() - MARKDOWN_IMAGE_RELEASE_AGE * 2;
+        let released = bitmaps.retain("b".into(), bitmap(4));
+        assert_eq!(released.len(), 1);
+        assert_eq!(released[0].0, "a", "the least recently painted image goes");
+        assert_eq!(bitmaps.bytes, 64);
+
+        // Both were painted this frame: over budget is not a reason to reload
+        // what is on screen.
+        let mut visible = MarkdownImageBitmaps {
+            byte_budget: 0,
+            ..Default::default()
+        };
+        assert!(visible.retain("a".into(), bitmap(4)).is_empty());
+        assert!(visible.retain("b".into(), bitmap(4)).is_empty());
+        assert_eq!(visible.entries.len(), 2);
     }
 
     /// Issue #80: an agent call the reader never touched must obey Settings →

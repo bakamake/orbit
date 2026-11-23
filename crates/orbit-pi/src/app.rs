@@ -599,6 +599,9 @@ pub struct OrbitApp {
     /// kind travels with the entity; creating/dropping this *is* the
     /// open/closed state. Each popup is anchored above its own chip.
     model_selector: Option<(PickerKind, Entity<ModelSelector>)>,
+    /// The composer chip row's top edge, recorded as it lays out. The open
+    /// picker reads it to cap its height, so it opens wholly above its chip.
+    chip_top: std::rc::Rc<std::cell::Cell<Option<gpui::Pixels>>>,
     /// The window-wide command palette (⌘P / ⌘K / sidebar Search row), if open.
     command_palette: Option<Entity<CommandPalette>>,
     /// Whatever held focus when the palette opened, so dismissing it can hand
@@ -2592,6 +2595,7 @@ impl OrbitApp {
             available_models: Vec::new(),
             available_thinking_levels: Vec::new(),
             model_selector: None,
+            chip_top: Default::default(),
             command_palette: None,
             palette_return_focus: ReturnFocus::default(),
             dialog_return_focus: ReturnFocus::default(),

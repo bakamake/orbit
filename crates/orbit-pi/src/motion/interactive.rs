@@ -345,9 +345,7 @@ where
         // Paint the value on screen. The transition owns the clock, so the
         // control needs no animation of its own; the watch asks for frames
         // while it runs.
-        let value = Transitions::get(ElementId::Name(self.name.clone()))
-            .map(|transition| transition.value_at(Instant::now()))
-            .unwrap_or(0.0);
+        let value = hover_progress(self.name.clone());
         let (fill, ink) = hover.at(value);
         let element = match ink {
             Some(ink) => element.text_color(ink),
@@ -510,6 +508,51 @@ impl Element for PointerWatch {
 
         self.child.paint(window, cx);
     }
+}
+
+/// How far the hover fade named `parent` has run: 0 at rest, 1 hovered.
+///
+/// Zero for a name that has never been painted, which is also the answer under
+/// Reduce Motion, where a fade keeps no transition at all — see [`follow`].
+pub(crate) fn hover_progress(parent: impl Into<SharedString>) -> f32 {
+    Transitions::get(ElementId::Name(parent.into()))
+        .map(|transition| transition.value_at(Instant::now()))
+        .unwrap_or(0.0)
+}
+
+/// Reveal a child with its parent's hover: row actions that fade in with the
+/// row's wash rather than appearing on one frame.
+///
+/// `parent` is the name the parent's [`hover`] / [`fade`] was given. The child
+/// keeps no clock of its own — two transitions for one pointer would drift a
+/// frame apart — so it reads the parent's value as it is built, and the
+/// parent's watch already asks for frames while its fade runs. `shown` holds
+/// the child at full opacity regardless (the row's menu is open).
+///
+/// Reduce Motion leaves the parent with no transition to read, so the child
+/// falls back to gpui's `group_hover` on `group` (the parent's `.group(…)`
+/// name) and appears on the frame the pointer arrives — the same end state,
+/// without the fade.
+pub(crate) fn follow<T>(
+    element: T,
+    parent: impl Into<SharedString>,
+    group: impl Into<SharedString>,
+    theme: &Theme,
+    shown: bool,
+) -> T
+where
+    T: InteractiveElement + Styled,
+{
+    if shown {
+        return element.opacity(1.0);
+    }
+    // The parent's role, so both resolve Reduce Motion the same way.
+    if Motion::Interaction.duration(theme).is_zero() {
+        return element
+            .opacity(0.0)
+            .group_hover(group, |style| style.opacity(1.0));
+    }
+    element.opacity(hover_progress(parent))
 }
 
 /// A state-driven transition: the caller passes the value it wants now, and the
@@ -841,6 +884,48 @@ mod tests {
             (transition, changed)
         });
         assert!(!repeat);
+    }
+
+    /// A follower paints its parent's hover value: nothing of its own, so the
+    /// row's actions and the row's wash can never be a frame apart.
+    #[test]
+    fn a_follower_takes_its_parents_hover_value() {
+        let theme = Theme::dark();
+        let opacity = |parent: &'static str, shown: bool| {
+            let mut child = follow(div().id("follow-child"), parent, "follow-group", &theme, shown);
+            child.style().opacity
+        };
+        assert_eq!(opacity("follow-never-painted", false), Some(0.0));
+
+        let now = Instant::now();
+        Transitions::update("follow-rested", |_| (Transition::settled(0.0, now), ()));
+        Transitions::update("follow-hovered", |_| (Transition::settled(1.0, now), ()));
+        assert_eq!(opacity("follow-rested", false), Some(0.0));
+        assert_eq!(opacity("follow-hovered", false), Some(1.0));
+        assert_eq!(
+            opacity("follow-rested", true),
+            Some(1.0),
+            "an open menu holds the action lit"
+        );
+    }
+
+    /// Reduce Motion leaves the parent with no transition, so a follower must
+    /// not read one: it swaps through `group_hover` instead.
+    #[test]
+    fn a_follower_under_reduce_motion_ignores_the_registry() {
+        let mut theme = Theme::dark();
+        theme.ui.motion = crate::theme::MotionPreference::Reduced;
+        Transitions::update("follow-reduced", |_| {
+            (Transition::settled(1.0, Instant::now()), ())
+        });
+        let mut child = follow(
+            div().id("follow-reduced-child"),
+            "follow-reduced",
+            "follow-group",
+            &theme,
+            false,
+        );
+        assert_eq!(child.style().opacity, Some(0.0), "hidden until group hover");
     }
 
     /// Hovering writes a transition; a resting pointer does not restart it, and

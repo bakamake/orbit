@@ -569,6 +569,11 @@ fn settings_section_meta(section: SettingsSection) -> (&'static str, &'static st
         .unwrap_or(("icons/settings.svg", "settings.general"))
 }
 
+/// A section's translated nav label, for prompts that name where leaving goes.
+pub(super) fn settings_section_label(section: SettingsSection) -> String {
+    tr!(settings_section_meta(section).1)
+}
+
 /// Settings whose translated label or keyword list contains the already
 /// lowercased `needle`, in index order. An empty needle matches nothing —
 /// callers only mount results while a query is active.
@@ -8637,9 +8642,12 @@ impl OrbitApp {
         cx.notify();
     }
 
-    fn activate_settings_nav_row(&mut self, index: usize, cx: &mut Context<Self>) {
-        self.settings_nav_cursor = index;
+    pub(super) fn activate_settings_nav_row(&mut self, index: usize, cx: &mut Context<Self>) {
         let (section, _, _) = SETTINGS_SECTIONS[index];
+        // The cursor follows the section that actually opened, never the row
+        // that was clicked: a held navigation (Subagents asks before it drops
+        // edits) leaves both the selection and the keyboard cursor where they
+        // were, so the next arrow/Enter still reads the pane on screen.
         self.set_settings_section(section, cx);
         if self.settings_section == section && !self.settings_search.read(cx).text().is_empty() {
             self.settings_search.update(cx, |search, cx| search.clear(cx));

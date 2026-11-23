@@ -542,9 +542,24 @@ pub mod picker {
         ROW_SPACING.row_height(BufferLineHeight::Comfortable.resolve(TEXT.px(theme)), theme)
     }
 
-    /// A two-line row: a Default label over a Small secondary line.
+    /// The leading of a two-line row's stacked title and secondary line:
+    /// `Standard` (1.3×), not the `Comfortable` (1.618×) a one-line row is
+    /// centred in. Comfortable on each of two stacked lines puts both lines'
+    /// half-leading between the glyphs — about 8px of air at the default size —
+    /// which reads as two separate items rather than a label and its caption.
+    pub const STACK_LEADING: BufferLineHeight = BufferLineHeight::Standard;
+
+    /// One line box of a stacked title / secondary pair at `size`. Every
+    /// two-line row's text, its leading mark and its trailing title slot sit
+    /// on these boxes, so the pair is exactly [`two_line_entry_height`] tall.
+    pub fn stack_line_height(size: TextSize, theme: &Theme) -> Pixels {
+        STACK_LEADING.resolve(size.px(theme))
+    }
+
+    /// A two-line row: a Default label over a Small secondary line, on
+    /// [`STACK_LEADING`] — 42px at the default size.
     pub fn two_line_entry_height(theme: &Theme) -> Pixels {
-        let line = |size: TextSize| BufferLineHeight::Comfortable.resolve(size.px(theme));
+        let line = |size: TextSize| stack_line_height(size, theme);
         ROW_SPACING.row_height(line(TEXT) + line(SECONDARY_TEXT), theme)
     }
 }
@@ -1419,6 +1434,22 @@ mod tests {
         let line = px(20.);
         assert_eq!(ListItemSpacing::Dense.row_height(line, &theme), px(20.));
         assert!(close(ListItemSpacing::Sparse.row_height(line, &theme), 28.));
+    }
+
+    /// A two-line row stacks its title and caption on the Standard leading,
+    /// so the caption reads as the title's own: the pair is 18 + 16px at the
+    /// default size (GPUI rounds line boxes), where Comfortable's 23 + 19px put
+    /// about 8px of air between them. A one-line row keeps its Comfortable 31px.
+    #[test]
+    fn two_line_rows_stack_on_the_standard_leading() {
+        let theme = default_theme();
+        assert_eq!(picker::STACK_LEADING, BufferLineHeight::Standard);
+        assert!(close(picker::stack_line_height(picker::TEXT, &theme), 18.));
+        assert!(close(picker::stack_line_height(picker::SECONDARY_TEXT, &theme), 16.));
+        assert!(close(picker::two_line_entry_height(&theme), 42.));
+        assert!(close(picker::entry_height(&theme), 31.));
+        // Still clearly taller than a one-line row, and shorter than two of them.
+        assert!(picker::two_line_entry_height(&theme) > picker::entry_height(&theme));
     }
 
     #[test]

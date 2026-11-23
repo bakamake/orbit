@@ -200,6 +200,22 @@ const TERMINAL_MAIN_RESERVE: f32 = 320.;
 /// worse than a transcript with ⌘⇧B to bring the list back.
 const SIDEBAR_MIN_WINDOW_W: f32 = 880.;
 
+/// An invisible layer over its `relative()` parent that writes the parent's
+/// top edge (window coordinates) into `top` each time it lays out.
+///
+/// The composer's picker reads it to cap its height: gpui's `anchored` cannot
+/// size a menu, only snap one that does not fit back into the window, which
+/// slides it over the trigger. Measuring in prepaint costs no extra frame,
+/// because the chip has laid out on every frame before the picker opens.
+fn record_top(top: std::rc::Rc<std::cell::Cell<Option<Pixels>>>) -> impl IntoElement {
+    gpui::canvas(
+        move |bounds, _, _| top.set(Some(bounds.origin.y)),
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .inset_0()
+}
+
 /// Whether the sessions sidebar is on screen. The user's toggle is the first
 /// word, but a full-window surface (Settings) and a window too narrow for both
 /// panes each override it — the panel stays mounted and simply does not paint.
@@ -2770,8 +2786,12 @@ impl OrbitApp {
             .flex()
             .flex_col()
             .items_start()
+            .relative()
             .children(self.chip_popup(PickerKind::Model, &theme))
             .child(chip)
+            // Record where the chip row starts, for the picker's height cap.
+            // The thinking chip sits on the same row, so one edge serves both.
+            .child(record_top(self.chip_top.clone()))
     }
 
     /// The thinking-level chip: the reasoning level in muted ink + caret,

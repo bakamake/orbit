@@ -1751,11 +1751,16 @@ pub(crate) fn render_side_row(
                             false,
                         ))
                         .faded(&theme, |button| {
-                            button
-                                // Revealed on row hover — the quiet default
-                                // keeps group headers to just label + count.
-                                .opacity(0.)
-                                .group_hover("workspace-row", |s| s.opacity(1.))
+                            // Revealed on row hover, fading in with the
+                            // header's wash — the quiet default keeps group
+                            // headers to just label + count.
+                            crate::motion::follow(
+                                button,
+                                workspace_header_fade(&label),
+                                "workspace-row",
+                                &theme,
+                                false,
+                            )
                                 .on_mouse_up(MouseButton::Left, {
                                     let this = this_new.clone();
                                     move |_, window, cx| {
@@ -1788,7 +1793,7 @@ pub(crate) fn render_side_row(
                                 .child(format!("{count}")),
                         )
                     }),
-                    format!("workspace-header-{label}"),
+                    workspace_header_fade(&label),
                     &theme,
                     nav_row_fill(&theme, false, cursor || menu_open),
                 ))
@@ -2858,6 +2863,12 @@ pub(crate) fn session_menu_popup(
     )
 }
 
+/// The name a workspace header's hover fade is keyed by. Its row actions
+/// read the same transition (`motion::follow`), so both must name it alike.
+fn workspace_header_fade(label: &str) -> String {
+    format!("workspace-header-{label}")
+}
+
 /// The hover-revealed '…' button on a workspace group header. Clicking it
 /// opens the header's actions popup; propagation stops so the header's
 /// collapse toggle doesn't also fire.
@@ -2872,7 +2883,7 @@ pub(crate) fn workspace_menu_button(
     let this_for_popup = this.clone();
     let label_for_click = label.clone();
     let cwd_for_click = cwd.clone();
-    IconButton::new(
+    let button = IconButton::new(
         ElementId::Name(format!("workspace-more-{label}").into()),
         "icons/more.svg",
     )
@@ -2895,10 +2906,16 @@ pub(crate) fn workspace_menu_button(
             app.toggle_workspace_menu(menu, window, cx);
         });
     })
-    .relative()
-    // Revealed on row hover, or while this header's menu is open.
-    .opacity(if menu.is_some() { 1.0 } else { 0.0 })
-    .group_hover("workspace-row", |s| s.opacity(1.))
+    .relative();
+    // Revealed on row hover (fading in with the header's wash), or held while
+    // this header's menu is open.
+    crate::motion::follow(
+        button,
+        workspace_header_fade(&label),
+        "workspace-row",
+        &theme,
+        menu.is_some(),
+    )
     .children(menu.map(|menu| {
         div()
             .absolute()

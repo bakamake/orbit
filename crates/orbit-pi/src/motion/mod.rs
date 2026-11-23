@@ -26,6 +26,8 @@ pub(crate) mod reveal;
 pub(crate) mod transition;
 
 // The front door.
-pub(crate) use interactive::{blend, control, fade, hover, state, Hover, Hovered};
+pub(crate) use interactive::{
+    blend, control, fade, follow, hover, state, Hover, Hovered,
+};
 pub(crate) use panel::{slide, Anchor, Mount, Slide};
 pub(crate) use reveal::{arrive, enter};

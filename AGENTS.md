@@ -448,7 +448,9 @@ not cover it, and add it to the table above.
 Orbit collects no telemetry. There is no analytics crate, no installation
 identifier, and no network reporting of product usage; the app talks to the
 network only for things the user asked for — update checks, GitHub metadata
-for the UI, and the model providers the agent is configured to call. Do not
+for the UI, the images in Markdown the user opens (inline, through the bounded
+HTTPS client in `http.rs`), and the model providers the agent is configured to
+call. Do not
 reintroduce an analytics path. See [`PRIVACY.md`](PRIVACY.md) for what leaves
 the machine.
 

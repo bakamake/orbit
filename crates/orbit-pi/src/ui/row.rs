@@ -101,8 +101,9 @@ pub(crate) fn picker_entry<E: Styled + InteractiveElement>(el: E, theme: &Theme)
         .text_size(picker::TEXT.px(theme))
 }
 
-/// One fixed text line box inside a picker row, at the Comfortable leading
-/// [`picker::two_line_entry_height`] measures. Used by [`PickerRow`].
+/// One fixed text line box inside a one-line picker row, at the Comfortable
+/// leading [`picker::entry_height`] centres. A two-line row stacks its lines
+/// on [`picker::stack_line_height`] instead. Used by [`PickerRow`].
 fn picker_line_height(size: TextSize, theme: &Theme) -> gpui::Pixels {
     BufferLineHeight::Comfortable.resolve(size.px(theme))
 }
@@ -111,13 +112,13 @@ fn picker_line_height(size: TextSize, theme: &Theme) -> gpui::Pixels {
 /// a badge, a count, a check. Exactly the title's line box tall, so in a
 /// two-line row these sit level with the title instead of floating between
 /// the title and the detail line. The row puts its children at the top
-/// (`items_start`); a one-line row is unchanged, since its single line is the
-/// whole row.
+/// (`items_start`). Only two-line rows carry it, so it takes the stacked
+/// title's line box.
 pub(crate) fn picker_title_slot(theme: &Theme) -> gpui::Div {
     div()
         .debug_selector(|| "picker-title-slot".to_string())
         .flex_none()
-        .h(picker_line_height(picker::TEXT, theme))
+        .h(picker::stack_line_height(picker::TEXT, theme))
         .flex()
         .items_center()
         .gap(list_item::content_gap(theme))
@@ -249,13 +250,21 @@ impl PickerRow {
         };
         let gap = list_item::content_gap(theme);
         let icon_size = context_menu::ICON.px(theme);
+        // A lone title fills the row's Comfortable line; over a detail line
+        // the pair stacks on the tighter leading, so the caption reads as the
+        // title's own.
+        let title_h = if self.detail.is_some() {
+            picker::stack_line_height(picker::TEXT, theme)
+        } else {
+            picker_line_height(picker::TEXT, theme)
+        };
         let leading = self.mark.map(|mark| match mark {
             MarkElement::Image(logo) => div()
                 .debug_selector(|| "picker-row-leading".to_string())
                 .flex_none()
                 // Exactly the title's line box, so the mark and the title
                 // share one optical line whatever the row's total height.
-                .h(picker_line_height(picker::TEXT, theme))
+                .h(title_h)
                 .flex()
                 .items_center()
                 .child(
@@ -269,7 +278,7 @@ impl PickerRow {
             MarkElement::Icon(path) => div()
                 .debug_selector(|| "picker-row-leading".to_string())
                 .flex_none()
-                .h(picker_line_height(picker::TEXT, theme))
+                .h(title_h)
                 .flex()
                 .items_center()
                 .child(icon(path, icon_size, theme.text_muted))
@@ -282,7 +291,7 @@ impl PickerRow {
                     .flex_none()
                     // Exactly the title's line box, so the glyph and the title
                     // share one optical line whatever the row's total height.
-                    .h(picker_line_height(picker::TEXT, theme))
+                    .h(title_h)
                     .flex()
                     .items_center()
                     .child(icon(path, icon_size, color))
@@ -300,7 +309,7 @@ impl PickerRow {
                 .pl(indent)
                 .truncate()
                 .text_size(picker::SECONDARY_TEXT.px(theme))
-                .line_height(picker_line_height(picker::SECONDARY_TEXT, theme))
+                .line_height(picker::stack_line_height(picker::SECONDARY_TEXT, theme))
                 .text_color(self.detail_color)
                 .child(detail);
             if self.detail_mono {
@@ -332,7 +341,7 @@ impl PickerRow {
                             .min_w_0()
                             .truncate()
                             .font_weight(self.weight)
-                            .line_height(picker_line_height(picker::TEXT, theme))
+                            .line_height(title_h)
                             .text_color(self.title_color)
                             .child(self.title),
                     ),
@@ -386,9 +395,13 @@ pub(crate) fn option_row(
             .min_w_0()
             .flex()
             .flex_col()
+            // The name and its description stack on the two-line leading, the
+            // same rhythm as every other two-line picker row; the leading is
+            // the only space between them.
             .child(
                 div()
                     .font_weight(FontWeight::MEDIUM)
+                    .line_height(picker::stack_line_height(picker::TEXT, theme))
                     .text_color(if lit {
                         theme.text_primary
                     } else {
@@ -398,9 +411,9 @@ pub(crate) fn option_row(
             )
             .child(
                 div()
-                    .mt(DynamicSpacing::Base02.px(theme))
                     .whitespace_normal()
                     .text_size(picker::SECONDARY_TEXT.px(theme))
+                    .line_height(picker::stack_line_height(picker::SECONDARY_TEXT, theme))
                     .text_color(if lit {
                         theme.text_primary.opacity(0.75)
                     } else {
