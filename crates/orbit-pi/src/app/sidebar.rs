@@ -1,9 +1,9 @@
 use super::format::*;
 use super::*;
-use crate::ui::popover::anchored_menu;
-use crate::ui::popover::row_menu;
 use crate::ui::button::{Button, ButtonVariant};
 use crate::ui::menu::MenuKey;
+use crate::ui::popover::anchored_menu;
+use crate::ui::popover::row_menu;
 use crate::ui::prelude::*;
 
 use gpui::{point, Div, Hsla, Pixels};
@@ -609,14 +609,16 @@ pub(crate) fn empty_search_state(
                 .text_align(TextAlign::Center)
                 .child(tr!("sidebar.no_sessions_match", query = query)),
         )
-        .child(Button::new("sidebar-search-empty-clear", ButtonVariant::Secondary)
-            .size(ButtonSize::Compact)
-            .label(tr!("common.clear"))
-            .faded(theme, move |button| {
-                button.on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                    input.update(cx, |input, cx| input.clear(cx));
-                })
-            }))
+        .child(
+            Button::new("sidebar-search-empty-clear", ButtonVariant::Secondary)
+                .size(ButtonSize::Compact)
+                .label(tr!("common.clear"))
+                .faded(theme, move |button| {
+                    button.on_mouse_up(MouseButton::Left, move |_, _, cx| {
+                        input.update(cx, |input, cx| input.clear(cx));
+                    })
+                }),
+        )
         .into_any_element()
 }
 
@@ -1207,155 +1209,226 @@ fn session_card_summary(title: &str, first_message: &str) -> Option<SharedString
 /// Same wait as GPUI's own tooltips, so scrolling the list does not flash a
 /// card on every row the pointer crosses.
 const SESSION_CARD_DELAY: Duration = Duration::from_millis(500);
-const SESSION_CARD_PROVIDER_LIMIT: usize = 3;
+/// Render-time wrapper: dimensions come from the actual window, including resize.
+#[derive(IntoElement)]
+struct SessionCardPopup {
+    hover: SessionTooltip,
+    theme: Theme,
+    app: Entity<OrbitApp>,
+    path: PathBuf,
+}
 
-/// The hover card. A definite width (not `max_w` around a nowrap title) is
-/// what keeps a long title inside the elevation background: the title wraps,
-/// and the metadata lines truncate inside that same width.
-fn session_card(hover: &SessionTooltip, theme: &Theme) -> impl IntoElement {
+impl gpui::RenderOnce for SessionCardPopup {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let path = self.path;
+        // The app owns the handle: the wheel scrolls the card, and Page Up /
+        // Page Down move the same handle for a reader with no pointer.
+        let scroll = self.app.read(cx).session_card_scroll.clone();
+        session_card_in_viewport(&self.hover, &self.theme, window.viewport_size(), &scroll)
+            .on_hover(move |hovered, _, cx| {
+                self.app.update(cx, |app, cx| {
+                    app.hover_session_card_popup(path.clone(), *hovered, cx);
+                });
+            })
+    }
+}
+
+/// Bespoke session preview: identity, location, providers, then the shortcut hint.
+/// A definite tooltip width keeps wrapped data inside the shared floating frame.
+/// This is read-only content; pointer and keyboard preview share this paint.
+/// Where a Page Up / Page Down leaves the session preview.
+///
+/// `offset` is the card's current scroll offset — `0` at the top, negative as
+/// the content moves up — `page` is how far one press travels, `max` is the
+/// card's `max_offset.height`, and `direction` is `1.0` toward the top and
+/// `-1.0` toward the end. The result is clamped into `-max..=0`, so a press at
+/// either end stays put instead of scrolling into empty space.
+fn paged_offset(offset: Pixels, page: Pixels, max: Pixels, direction: f32) -> Pixels {
+    if max <= px(0.) {
+        return px(0.);
+    }
+    (offset + page * direction).clamp(-max, px(0.))
+}
+
+fn session_card_in_viewport(
+    hover: &SessionTooltip,
+    theme: &Theme,
+    viewport: gpui::Size<Pixels>,
+    scroll: &gpui::ScrollHandle,
+) -> gpui::Stateful<gpui::Div> {
     let theme = &theme.for_floating();
     let meta = tooltip::META_TEXT.px(theme);
     let icon_size = IconSize::XSmall.px(theme);
+    let margin = crate::theme::tokens::popover::WINDOW_MARGIN;
     div()
+        .id("session-preview-scroll")
+        .occlude()
+        .overflow_y_scroll()
+        .track_scroll(scroll)
+        .max_h((viewport.height - margin * 2.).max(px(0.)))
+        .line_height(gpui::relative(1.3))
         .debug_selector(|| "session-tooltip".into())
         .elevation_2(theme)
         .font_family(crate::theme::ui_font_family())
         .text_size(tooltip::TEXT.px(theme))
         .text_color(theme.text_primary)
-        .py(tooltip::padding_y(theme))
-        .px(tooltip::padding_x(theme))
-        .w(tooltip::max_width(theme))
+        .p(DynamicSpacing::Base12.px(theme))
+        .w((tooltip::max_width(theme) * 1.5).min((viewport.width - margin * 2.).max(px(0.))))
         .flex()
         .flex_col()
-        .gap(DynamicSpacing::Base04.px(theme))
-        .child(
-            div()
-                .w_full()
-                .whitespace_normal()
-                .font_weight(FontWeight::MEDIUM)
-                .child(hover.title.clone()),
-        )
-        .when_some(hover.summary.clone(), |card, summary| {
-            card.child(
-                div()
-                    .debug_selector(|| "session-card-summary".into())
-                    .w_full()
-                    .line_clamp(3)
-                    .text_size(meta)
-                    .text_color(theme.text_secondary)
-                    .child(summary),
-            )
-        })
+        .gap(DynamicSpacing::Base12.px(theme))
         .child(
             div()
                 .w_full()
                 .flex()
-                .items_center()
-                .flex_wrap()
-                .gap(DynamicSpacing::Base06.px(theme))
-                .child(icon("icons/branch.svg", icon_size, theme.text_muted))
+                .flex_col()
+                .gap(DynamicSpacing::Base04.px(theme))
                 .child(
                     div()
-                        .min_w_0()
+                        .w_full()
                         .whitespace_normal()
-                        .text_size(meta)
-                        .text_color(theme.text_secondary)
-                        .child(hover.workspace.clone()),
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(hover.title.clone()),
                 )
-                .when_some(hover.branch.clone(), |line, name| {
-                    line.child(
+                .when_some(hover.summary.clone(), |header, summary| {
+                    header.child(
                         div()
-                            .min_w_0()
-                            .whitespace_normal()
+                            .debug_selector(|| "session-card-summary".into())
+                            .w_full()
+                            .line_clamp(3)
                             .text_size(meta)
-                            .text_color(theme.text_muted)
-                            .child(name),
-                    )
-                })
-                .when_some(hover.ahead.clone(), |line, ahead| {
-                    line.child(
-                        div()
-                            .flex_none()
-                            .text_size(meta)
-                            .text_color(theme.success)
-                            .child(ahead),
-                    )
-                })
-                .when_some(hover.behind.clone(), |line, behind| {
-                    line.child(
-                        div()
-                            .flex_none()
-                            .text_size(meta)
-                            .text_color(theme.warning)
-                            .child(behind),
+                            .text_color(theme.text_secondary)
+                            .child(summary),
                     )
                 }),
         )
         .child(
             div()
+                .debug_selector(|| "session-card-location".into())
                 .w_full()
                 .flex()
-                .items_center()
-                .gap(DynamicSpacing::Base06.px(theme))
-                .child(icon("icons/folder.svg", icon_size, theme.text_muted))
+                .flex_col()
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .whitespace_normal()
-                        .text_size(meta)
-                        .text_color(theme.text_muted)
-                        .child(hover.path.clone()),
-                ),
-        )
-        .children(
-            hover
-                .providers
-                .iter()
-                .take(SESSION_CARD_PROVIDER_LIMIT)
-                .map(|provider| {
-                    div()
-                        .w_full()
                         .flex()
-                        .items_center()
-                        .gap(DynamicSpacing::Base06.px(theme))
-                        .child(div().flex_none().child(icon_dyn(
-                            provider_icon(&provider.provider),
-                            icon_size,
-                            provider_mark_color(&provider.provider, theme, theme.text_muted),
-                        )))
+                        .flex_col()
+                        .gap(DynamicSpacing::Base04.px(theme))
+                        .text_size(meta)
                         .child(
                             div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(meta)
-                                .text_color(theme.text_muted)
-                                .child(session_provider_label(provider)),
+                                .w_full()
+                                .whitespace_normal()
+                                .text_color(theme.text_secondary)
+                                .font_weight(FontWeight::MEDIUM)
+                                .flex()
+                                .items_start()
+                                .gap(DynamicSpacing::Base06.px(theme))
+                                .child(div().flex_none().child(icon(
+                                    "icons/folder.svg",
+                                    icon_size,
+                                    theme.text_muted,
+                                )))
+                                .child(div().flex_1().min_w_0().child(hover.workspace.clone())),
                         )
-                }),
+                        .child(
+                            div()
+                                .debug_selector(|| "session-card-path".into())
+                                .w_full()
+                                .pl(icon_size + DynamicSpacing::Base06.px(theme))
+                                .font_family(crate::theme::code_font_family())
+                                .whitespace_normal()
+                                .text_color(theme.text_muted)
+                                .child(hover.path.clone()),
+                        )
+                        .when(
+                            hover.branch.is_some()
+                                || hover.ahead.is_some()
+                                || hover.behind.is_some(),
+                            |location| {
+                                location.child(
+                                    div()
+                                        .debug_selector(|| "session-card-branch".into())
+                                        .w_full()
+                                        .flex()
+                                        .items_start()
+                                        .gap(DynamicSpacing::Base06.px(theme))
+                                        .child(div().flex_none().child(icon(
+                                            "icons/branch.svg",
+                                            icon_size,
+                                            theme.text_muted,
+                                        )))
+                                        .when_some(hover.branch.clone(), |line, name| {
+                                            line.child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .whitespace_normal()
+                                                    .text_color(theme.text_secondary)
+                                                    .child(name),
+                                            )
+                                        })
+                                        .when_some(hover.ahead.clone(), |line, ahead| {
+                                            line.child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_color(theme.success)
+                                                    .child(ahead),
+                                            )
+                                        })
+                                        .when_some(hover.behind.clone(), |line, behind| {
+                                            line.child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_color(theme.warning)
+                                                    .child(behind),
+                                            )
+                                        }),
+                                )
+                            },
+                        ),
+                ),
         )
-        .when(
-            hover.providers.len() > SESSION_CARD_PROVIDER_LIMIT,
-            |card| {
-                card.child(
-                    div()
-                        .debug_selector(|| "session-provider-overflow".into())
-                        .w_full()
-                        .whitespace_normal()
-                        .text_size(meta)
-                        .text_color(theme.text_muted)
-                        .child(tr!(
-                            "sidebar.more_session_providers",
-                            count = hover.providers.len() - SESSION_CARD_PROVIDER_LIMIT
-                        )),
-                )
-            },
-        )
+        .when(!hover.providers.is_empty(), |card| {
+            card.child(
+                div()
+                    .debug_selector(|| "session-card-providers".into())
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(DynamicSpacing::Base04.px(theme))
+                    .children(hover.providers.iter().map(|provider| {
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_start()
+                            .gap(DynamicSpacing::Base06.px(theme))
+                            .child(div().flex_none().child(icon_dyn(
+                                provider_icon(&provider.provider),
+                                icon_size,
+                                provider_mark_color(&provider.provider, theme, theme.text_muted),
+                            )))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(meta)
+                                    .text_color(theme.text_secondary)
+                                    .child(session_provider_label(provider)),
+                            )
+                    })),
+            )
+        })
         .when_some(hover.shortcut.clone(), |card, shortcut| {
             card.child(
                 div()
+                    .debug_selector(|| "session-card-shortcut".into())
                     .w_full()
+                    .border_t_1()
+                    .border_color(theme.border_subtle)
+                    .pt(DynamicSpacing::Base08.px(theme))
                     .whitespace_normal()
                     .text_size(meta)
                     .text_color(theme.text_muted)
@@ -2340,11 +2413,18 @@ pub(crate) fn render_side_row(
                     && session_menu.is_none()
                     && workspace_menu.is_none())
             {
-                card = card.child(
-                    div().absolute().top_0().right_0().size(px(0.)).child(
-                        anchored_menu(Corner::TopLeft, point(tooltip::offset_x(&theme), px(0.)), session_card(&hover, &theme)),
+                card = card.child(div().absolute().top_0().right_0().size(px(0.)).child(
+                    anchored_menu(
+                        Corner::TopLeft,
+                        point(tooltip::offset_x(&theme), px(0.)),
+                        SessionCardPopup {
+                            hover,
+                            theme,
+                            app: this.clone(),
+                            path: session.path.clone(),
+                        },
                     ),
-                );
+                ));
             }
             row = row.child(crate::motion::hover(
                 card,
@@ -2559,21 +2639,25 @@ pub(crate) fn session_menu_popup(
                     .flex()
                     .justify_end()
                     .gap(DynamicSpacing::Base06.px(&theme))
-                    .child(Button::new("menu-cancel", ButtonVariant::Secondary)
-.size(ButtonSize::Default)
-.faded(&theme, |button| button
-                            .on_mouse_down(MouseButton::Left, {
-                                let this = this.clone();
-                                move |_, _, cx| {
-                                    cx.stop_propagation();
-                                    this.update(cx, |app, cx| app.on_menu_cancel(cx));
-                                }
-                            })
-                            .child(tr!("sidebar.cancel"))))
+                    .child(
+                        Button::new("menu-cancel", ButtonVariant::Secondary)
+                            .size(ButtonSize::Default)
+                            .faded(&theme, |button| {
+                                button
+                                    .on_mouse_down(MouseButton::Left, {
+                                        let this = this.clone();
+                                        move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            this.update(cx, |app, cx| app.on_menu_cancel(cx));
+                                        }
+                                    })
+                                    .child(tr!("sidebar.cancel"))
+                            }),
+                    )
                     .child(
                         Button::new("menu-confirm-delete", ButtonVariant::Destructive)
-.size(ButtonSize::Default)
-.render(&theme)
+                            .size(ButtonSize::Default)
+                            .render(&theme)
                             .on_mouse_down(MouseButton::Left, {
                                 let this = this.clone();
                                 move |_, window, cx| {
@@ -2766,7 +2850,12 @@ pub(crate) fn session_menu_popup(
     // to its card — the standard app dropdown position. `deferred` paints it
     // above the rest of the list — same convention as the composer chip
     // pickers. `snap_to_window` keeps it inside the window near the edges.
-    row_menu(menu.at, Corner::TopLeft, TextSize::Default.px(&theme) + DynamicSpacing::Base06.px(&theme), popup)
+    row_menu(
+        menu.at,
+        Corner::TopLeft,
+        TextSize::Default.px(&theme) + DynamicSpacing::Base06.px(&theme),
+        popup,
+    )
 }
 
 /// The hover-revealed '…' button on a workspace group header. Clicking it
@@ -2933,9 +3022,15 @@ where
     if !enabled {
         return menu_item_unavailable(id, icon_path, label, reason.into().to_string(), theme);
     }
-    workspace_menu_item(id, icon_path, label, theme, this, highlighted, move |app, _, cx| {
-        on_click(app, cx)
-    })
+    workspace_menu_item(
+        id,
+        icon_path,
+        label,
+        theme,
+        this,
+        highlighted,
+        move |app, _, cx| on_click(app, cx),
+    )
     .into_any_element()
 }
 
@@ -3027,8 +3122,8 @@ fn workspace_delete_confirm(
     let cancel = {
         let this = this.clone();
         Button::new("wm-delete-cancel", ButtonVariant::Secondary)
-.size(ButtonSize::Default)
-.render(&theme)
+            .size(ButtonSize::Default)
+            .render(&theme)
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                 cx.stop_propagation();
                 this.update(cx, |app, cx| app.on_workspace_delete_files_cancel(cx));
@@ -3038,8 +3133,8 @@ fn workspace_delete_confirm(
     let confirm = {
         let this = this.clone();
         Button::new("wm-delete-confirm", ButtonVariant::Destructive)
-.size(ButtonSize::Default)
-.render(&theme)
+            .size(ButtonSize::Default)
+            .render(&theme)
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                 cx.stop_propagation();
                 this.update(cx, |app, cx| app.on_workspace_delete_files_confirm(cx));
@@ -3243,7 +3338,12 @@ pub(crate) fn workspace_menu_popup(
         })
         .child(body);
 
-    row_menu(menu.at, Corner::TopLeft, ButtonSize::Compact.height(&theme) + popover::MENU_OFFSET, popup)
+    row_menu(
+        menu.at,
+        Corner::TopLeft,
+        ButtonSize::Compact.height(&theme) + popover::MENU_OFFSET,
+        popup,
+    )
 }
 
 /// A grid cell's side: a square hit target that holds an [`IconSize::Medium`]
@@ -4160,17 +4260,20 @@ pub(crate) fn empty_sessions_state(
         )
         // The empty state offers the action that resolves it. A pane that says
         // "pick a folder" without a way to do it is a dead end.
-        .child(Button::new("empty-sessions-new", ButtonVariant::Primary)
-            .label(tr!("sidebar.new_session"))
-            .faded(&theme, move |button| {
-                button
-                    .mt(DynamicSpacing::Base06.px(&theme))
-                    .on_mouse_up(MouseButton::Left, move |_, window, cx| {
-                        this.update(cx, |app, cx| {
-                            app.on_new_session(&crate::NewSession, window, cx)
-                        });
-                    })
-            }))
+        .child(
+            Button::new("empty-sessions-new", ButtonVariant::Primary)
+                .label(tr!("sidebar.new_session"))
+                .faded(&theme, move |button| {
+                    button.mt(DynamicSpacing::Base06.px(&theme)).on_mouse_up(
+                        MouseButton::Left,
+                        move |_, window, cx| {
+                            this.update(cx, |app, cx| {
+                                app.on_new_session(&crate::NewSession, window, cx)
+                            });
+                        },
+                    )
+                }),
+        )
 }
 
 // ── controller ────────────────────────────────────────────────────
@@ -4183,15 +4286,19 @@ impl OrbitApp {
     /// Drop the hover card and cancel a timer that has not fired yet.
     pub(super) fn clear_session_card(&mut self, cx: &mut Context<Self>) {
         self.session_card_wait = None;
+        self.session_card_popup_hover = None;
         self.session_card_task = gpui::Task::ready(());
+        // A card that comes back — the same row, or the next one under the
+        // cursor — opens at the top rather than wherever the last one was left.
+        self.session_card_scroll.set_offset(point(px(0.), px(0.)));
         if self.session_card.take().is_some() {
             cx.notify();
         }
     }
 
     /// Show the session hover card after the tooltip delay, pinned to that
-    /// row. Leaving the row drops it at once. The card is not itself a hover
-    /// target, so moving onto it counts as leaving.
+    /// row. A short leave grace lets the pointer cross the gap into the
+    /// scrollable card; entering either surface cancels pending dismissal.
     pub(super) fn hover_session_card(
         &mut self,
         path: PathBuf,
@@ -4204,6 +4311,11 @@ impl OrbitApp {
                 || self.sidebar_sort_menu
                 || self.sidebar_show_menu
             {
+                return;
+            }
+            if self.session_card.as_ref() == Some(&path) {
+                self.session_card_task = gpui::Task::ready(());
+                self.session_card_wait = Some(path);
                 return;
             }
             if self.session_card_wait.as_ref() == Some(&path) {
@@ -4225,9 +4337,36 @@ impl OrbitApp {
         } else if self.session_card_wait.as_ref() == Some(&path) {
             self.session_card_wait = None;
             self.session_card_task = gpui::Task::ready(());
-            if self.session_card.take().is_some() {
-                cx.notify();
+            self.dismiss_unhovered_session_card(path, cx);
+        }
+    }
+
+    /// Popup and row callbacks arrive in reverse paint order, not leave/enter
+    /// order. Never let one surface's leave revoke the other's hover ownership.
+    fn hover_session_card_popup(&mut self, path: PathBuf, hovered: bool, cx: &mut Context<Self>) {
+        if hovered {
+            // Ignore stale popup events after menu/keyboard suppression cleared it.
+            if self.session_card.as_ref() == Some(&path) {
+                self.session_card_popup_hover = Some(path);
+                self.session_card_task = gpui::Task::ready(());
             }
+        } else if self.session_card_popup_hover.as_ref() == Some(&path) {
+            self.session_card_popup_hover = None;
+            self.dismiss_unhovered_session_card(path, cx);
+        }
+    }
+
+    fn dismiss_unhovered_session_card(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.session_card.as_ref() == Some(&path)
+            && self.session_card_wait.as_ref() != Some(&path)
+            && self.session_card_popup_hover.as_ref() != Some(&path)
+        {
+            self.session_card_task = cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(200))
+                    .await;
+                let _ = this.update(cx, |app, cx| app.clear_session_card(cx));
+            });
         }
     }
 
@@ -5421,7 +5560,6 @@ impl OrbitApp {
         }
         if !self.sidebar_visible {
             self.sidebar_visible = true;
-            self.sidebar_slide_gen = self.sidebar_slide_gen.wrapping_add(1);
         }
         self.clear_session_card(cx);
         let rows = self.sidebar_rows_for_nav();
@@ -5551,6 +5689,68 @@ impl OrbitApp {
             return;
         }
         self.move_sidebar_cursor(|_| usize::MAX, cx);
+    }
+
+    /// Page Up on the sidebar: scroll the session preview toward its top.
+    ///
+    /// The card is the only place a keyboard reader sees a session's full path
+    /// and provider list, and it can be taller than the window; the arrows are
+    /// already moving the row cursor, so the card pages instead. Registered in
+    /// the `Sidebar` context, which is the only place the card shows.
+    pub(super) fn on_sidebar_preview_up(
+        &mut self,
+        _: &crate::SidebarPreviewUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.scroll_session_preview(1.0, cx);
+    }
+
+    /// Page Down on the sidebar: scroll the session preview toward its end.
+    pub(super) fn on_sidebar_preview_down(
+        &mut self,
+        _: &crate::SidebarPreviewDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.scroll_session_preview(-1.0, cx);
+    }
+
+    /// Move the session preview by `direction` pages: `1.0` toward the top,
+    /// `-1.0` toward the end.
+    ///
+    /// A no-op when no card is on screen, so the chord stays quiet in a
+    /// collapsed or empty sidebar instead of scrolling a view nobody can see.
+    fn scroll_session_preview(&mut self, direction: f32, cx: &mut Context<Self>) {
+        if !self.session_preview_showing() {
+            return;
+        }
+        let handle = &self.session_card_scroll;
+        let max = handle.max_offset().height;
+        if max <= px(0.) {
+            return;
+        }
+        // A page is the card's own visible height, less a line, so a reader
+        // keeps one row of context across the jump.
+        let page = (handle.bounds().size.height - px(24.)).max(px(40.));
+        let y = paged_offset(handle.offset().y, page, max, direction);
+        handle.set_offset(point(px(0.), y));
+        cx.notify();
+    }
+
+    /// Whether a session preview is on screen: the pointer's, or the one the
+    /// keyboard cursor paints for the row it is on.
+    ///
+    /// The card is a child of the row, so the two paths differ only in what
+    /// selected the row — this mirrors the condition in [`render_side_row`].
+    fn session_preview_showing(&self) -> bool {
+        self.session_card.is_some()
+            || (self.sidebar_visible
+                && self.sidebar_cursor.is_some()
+                && !self.sidebar_sort_menu
+                && !self.sidebar_show_menu
+                && self.session_menu.is_none()
+                && self.workspace_menu.is_none())
     }
 
     /// The open row menu's entries while it shows its action list (not the
@@ -5844,7 +6044,6 @@ impl OrbitApp {
         let session = sessions[session_ix].clone();
         if !self.sidebar_visible {
             self.sidebar_visible = true;
-            self.sidebar_slide_gen = self.sidebar_slide_gen.wrapping_add(1);
         }
         let visible_sessions = self.sidebar_sessions_filtered();
         let visible_ix = visible_sessions.iter().position(|item| item.path == path);
@@ -5917,7 +6116,8 @@ mod tests {
     }
 
     impl gpui::Render for SessionRowProbe {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let card_path = self.app.read(cx).session_card.clone();
             let rows = Rc::new(match &self.header {
                 Some(cwd) => vec![
                     SideRow::Workspace {
@@ -5969,7 +6169,7 @@ mod tests {
                 None,
                 &SidebarDragPaint::idle(),
                 false,
-                None,
+                card_path.as_deref(),
                 false,
                 self.theme,
             )
@@ -6132,6 +6332,242 @@ mod tests {
         }
     }
 
+    struct SessionCardProbe {
+        hover: SessionTooltip,
+        theme: Theme,
+        origin: Option<Point<Pixels>>,
+        scroll: gpui::ScrollHandle,
+    }
+
+    impl Render for SessionCardProbe {
+        fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let card = session_card_in_viewport(
+                &self.hover,
+                &self.theme,
+                window.viewport_size(),
+                &self.scroll,
+            );
+            if let Some(origin) = self.origin {
+                div()
+                    .size_full()
+                    .child(
+                        div()
+                            .absolute()
+                            .left(origin.x)
+                            .top(origin.y)
+                            .size(px(0.))
+                            .child(anchored_menu(
+                                Corner::TopLeft,
+                                point(tooltip::offset_x(&self.theme), px(0.)),
+                                card,
+                            )),
+                    )
+                    .into_any_element()
+            } else {
+                card.into_any_element()
+            }
+        }
+    }
+
+    fn session_card_probe(
+        hover: &SessionTooltip,
+        theme: &Theme,
+        origin: Option<Point<Pixels>>,
+        cx: &mut App,
+    ) -> Entity<SessionCardProbe> {
+        session_card_probe_with_scroll(hover, theme, origin, gpui::ScrollHandle::new(), cx)
+    }
+
+    /// The same probe with the caller's scroll handle, so a test can drive the
+    /// offset the card tracks.
+    fn session_card_probe_with_scroll(
+        hover: &SessionTooltip,
+        theme: &Theme,
+        origin: Option<Point<Pixels>>,
+        scroll: gpui::ScrollHandle,
+        cx: &mut App,
+    ) -> Entity<SessionCardProbe> {
+        cx.new(|_| SessionCardProbe {
+            hover: hover.clone(),
+            theme: *theme,
+            origin,
+            scroll,
+        })
+    }
+
+    struct SessionCardHandoffProbe(Entity<SessionRowProbe>);
+
+    impl Render for SessionCardHandoffProbe {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(div().w(px(240.)).child(self.0.clone()))
+        }
+    }
+
+    #[gpui::test]
+    fn session_card_direct_row_popup_handoff(cx: &mut gpui::TestAppContext) {
+        let theme = Theme::for_id(crate::theme::ThemeId::Orbit);
+        cx.update(|cx| cx.set_global(theme));
+        let app = cx.update(|cx| cx.new(OrbitApp::new));
+        let path = PathBuf::from("/tmp/handoff.jsonl");
+        let row_probe = cx.update(|cx| {
+            cx.new(|cx| {
+                cx.observe(&app, |_, _, cx| cx.notify()).detach();
+                SessionRowProbe {
+                    app: app.clone(),
+                    session: SessionInfo {
+                        path: path.clone(),
+                        id: "handoff".into(),
+                        cwd: "/tmp".into(),
+                        title: "Session".into(),
+                        first_message: String::new(),
+                        modified: std::time::SystemTime::now(),
+                    },
+                    status: None,
+                    active: false,
+                    show_updated: false,
+                    header: None,
+                    theme,
+                }
+            })
+        });
+        let (_, cx) = cx.add_window_view(|_, _| SessionCardHandoffProbe(row_probe));
+        cx.simulate_resize(gpui::size(px(960.), px(640.)));
+        cx.run_until_parked();
+        let row = cx.debug_bounds("session-row-card").unwrap();
+        cx.simulate_mouse_move(row.center(), None, gpui::Modifiers::none());
+        cx.run_until_parked();
+        cx.executor().advance_clock(SESSION_CARD_DELAY);
+        cx.run_until_parked();
+        assert_eq!(
+            app.read_with(cx, |app, _| app.session_card.clone()),
+            Some(path.clone())
+        );
+        // The real row now has its anchored popup child. Do not synthesize
+        // a row leave: one direct move must dispatch both GPUI hover callbacks.
+        let card = cx.debug_bounds("session-tooltip").unwrap();
+        assert!(!row.contains(&card.center()));
+        cx.simulate_mouse_move(card.center(), None, gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.session_card_wait.is_none()));
+        assert_eq!(
+            app.read_with(cx, |app, _| app.session_card_popup_hover.clone()),
+            Some(path.clone())
+        );
+        cx.executor().advance_clock(Duration::from_millis(300));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.session_card.is_some()));
+        // The reverse move must keep row ownership when popup leave runs.
+        cx.simulate_mouse_move(row.center(), None, gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.session_card_popup_hover.is_none()));
+        assert_eq!(
+            app.read_with(cx, |app, _| app.session_card_wait.clone()),
+            Some(path.clone())
+        );
+        cx.executor().advance_clock(Duration::from_millis(300));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.session_card.is_some()));
+        // Leaving both surfaces (from the popup) must still dismiss.
+        cx.simulate_mouse_move(card.center(), None, gpui::Modifiers::none());
+        cx.simulate_mouse_move(point(px(959.), px(639.)), None, gpui::Modifiers::none());
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.session_card.is_none()));
+        assert!(app.read_with(cx, |app, _| app.session_card_popup_hover.is_none()));
+
+        // Reopen, then right-click the real row while popup ownership is set.
+        cx.simulate_mouse_move(row.center(), None, gpui::Modifiers::none());
+        cx.run_until_parked();
+        cx.executor().advance_clock(SESSION_CARD_DELAY);
+        cx.run_until_parked();
+        cx.simulate_mouse_move(card.center(), None, gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.session_card_popup_hover.is_some()));
+        cx.simulate_mouse_down(row.center(), MouseButton::Right, gpui::Modifiers::none());
+        assert!(app.read_with(cx, |app, _| app.session_menu.is_some()));
+        assert!(app.read_with(cx, |app, _| app.session_card.is_none()
+            && app.session_card_wait.is_none()
+            && app.session_card_popup_hover.is_none()));
+        // Late events from the old popup, and row hover under a menu, must
+        // not resurrect ownership or a delayed card.
+        app.update(cx, |app, cx| {
+            app.hover_session_card_popup(path.clone(), true, cx);
+            app.hover_session_card(path.clone(), true, cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.session_card.is_none()
+            && app.session_card_wait.is_none()
+            && app.session_card_popup_hover.is_none()));
+    }
+
+    #[gpui::test]
+    fn session_card_anchored_bounds_fit_small_viewport_at_large_scale(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        for density in [80, 120] {
+            for origin in [
+                point(px(240.), px(0.)),
+                point(px(240.), px(620.)),
+                point(px(950.), px(320.)),
+            ] {
+                let cx = cx.add_empty_window();
+                cx.simulate_resize(gpui::size(px(960.), px(640.)));
+                let mut theme = Theme::for_id(crate::theme::ThemeId::Orbit);
+                theme.ui.ui_font_size = 20.;
+                theme.ui.spacing_density = density;
+                let hover = SessionTooltip {
+                    title: "Long session title ".repeat(40).into(),
+                    summary: None,
+                    shortcut: Some("Open ⌘2".into()),
+                    workspace: "Long workspace ".repeat(20).into(),
+                    path: format!("/tmp/{}", "directory/".repeat(100)).into(),
+                    branch: Some("feature/".repeat(100).into()),
+                    ahead: None,
+                    behind: None,
+                    providers: vec![sessions::SessionProvider {
+                        provider: "custom".into(),
+                        model: Some("long-model-".repeat(100)),
+                    }],
+                };
+                let viewport = gpui::size(px(960.), px(640.));
+                cx.draw(point(px(0.), px(0.)), viewport, |_, cx| {
+                    session_card_probe(&hover, &theme, Some(origin), cx)
+                });
+                let bounds = cx
+                    .debug_bounds("session-tooltip")
+                    .expect("anchored card painted");
+                assert!(
+                    bounds.left() >= px(0.) && bounds.top() >= px(0.),
+                    "{bounds:?}"
+                );
+                assert!(
+                    bounds.right() <= viewport.width && bounds.bottom() <= viewport.height,
+                    "{bounds:?}"
+                );
+                assert!(bounds.size.height > px(0.));
+            }
+        }
+    }
+
+    #[test]
+    fn a_page_press_moves_a_page_and_stops_at_both_ends() {
+        let max = px(400.);
+        let page = px(150.);
+        // Down moves the content up: 0 at the top, `-max` at the end.
+        assert_eq!(paged_offset(px(0.), page, max, -1.0), px(-150.));
+        assert_eq!(paged_offset(px(-300.), page, max, -1.0), px(-400.));
+        assert_eq!(paged_offset(px(-150.), page, max, 1.0), px(0.));
+        assert_eq!(paged_offset(px(-50.), page, max, 1.0), px(0.));
+        // Nothing scrollable, and a page larger than the content.
+        assert_eq!(paged_offset(px(0.), page, px(0.), -1.0), px(0.));
+        assert_eq!(paged_offset(px(-40.), px(900.), px(100.), -1.0), px(-100.));
+    }
+
     #[test]
     fn session_provider_labels_keep_each_provider_and_optional_model() {
         let providers = [
@@ -6194,9 +6630,114 @@ mod tests {
         );
     }
 
+    /// A preview can be taller than the window, so its overflow must be
+    /// reachable without a wheel. The card tracks the app's scroll handle and
+    /// `paged_offset` is what Page Up / Page Down move it by.
+    #[gpui::test]
+    fn the_session_preview_pages_its_overflow_without_a_wheel(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        let viewport = gpui::size(px(960.), px(320.));
+        cx.simulate_resize(viewport);
+        let theme = Theme::for_id(crate::theme::ThemeId::Orbit);
+        // Long enough to overflow a 320px window several times over.
+        let hover = SessionTooltip {
+            title: "A session with a title long enough to wrap twice over".into(),
+            summary: Some("And a summary beneath it that also wraps.".into()),
+            shortcut: Some("Open ⌘2".into()),
+            workspace: "A workspace with a long descriptive name".into(),
+            branch: Some(format!("feature/{}", "long-branch-".repeat(8)).into()),
+            ahead: Some("↑12".into()),
+            behind: Some("↓3".into()),
+            path: format!("/Users/developer/{}", "nested-directory/".repeat(12)).into(),
+            providers: (0..6)
+                .map(|index| sessions::SessionProvider {
+                    provider: format!("provider-{index}"),
+                    model: Some("long-model-identifier-".repeat(40)),
+                })
+                .collect(),
+        };
+        let scroll = gpui::ScrollHandle::new();
+        let draw = |cx: &mut gpui::VisualTestContext, scroll: &gpui::ScrollHandle| {
+            cx.draw(point(px(0.), px(0.)), viewport, |_, cx| {
+                session_card_probe_with_scroll(&hover, &theme, None, scroll.clone(), cx)
+            });
+        };
+
+        draw(cx, &scroll);
+        let max = scroll.max_offset().height;
+        assert!(
+            max > px(0.),
+            "the card tracks the handle and overflows: max {max:?}"
+        );
+        let footer_at_rest = cx
+            .debug_bounds("session-card-shortcut")
+            .expect("the shortcut footer paints");
+        assert_eq!(scroll.offset().y, px(0.), "it opens at the top");
+
+        let page = (scroll.bounds().size.height - px(24.)).max(px(40.));
+        // Page Down, as the handler does it.
+        scroll.set_offset(point(
+            px(0.),
+            paged_offset(scroll.offset().y, page, max, -1.0),
+        ));
+        draw(cx, &scroll);
+        assert_eq!(scroll.offset().y, -page, "one page, from the top");
+        let footer_paged = cx
+            .debug_bounds("session-card-shortcut")
+            .expect("the footer is still painted");
+        assert!(
+            footer_paged.origin.y < footer_at_rest.origin.y,
+            "the content moved up: {footer_paged:?} against {footer_at_rest:?}"
+        );
+
+        // Paging past the end stops at the end, and paging back stops at the top.
+        for _ in 0..20 {
+            scroll.set_offset(point(
+                px(0.),
+                paged_offset(scroll.offset().y, page, max, -1.0),
+            ));
+        }
+        draw(cx, &scroll);
+        assert_eq!(scroll.offset().y, -max, "clamped at the end");
+        for _ in 0..20 {
+            scroll.set_offset(point(
+                px(0.),
+                paged_offset(scroll.offset().y, page, max, 1.0),
+            ));
+        }
+        draw(cx, &scroll);
+        assert_eq!(scroll.offset().y, px(0.), "clamped at the top");
+    }
+
+    #[gpui::test]
+    fn a_preview_page_press_is_quiet_with_no_card_on_screen(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|_, cx| cx.set_global(Theme::for_id(crate::theme::ThemeId::Orbit)));
+        let app = cx.update(|_, cx| cx.new(OrbitApp::new));
+        app.update(cx, |app, cx| {
+            app.sidebar_cursor = None;
+            app.clear_session_card(cx);
+        });
+        let viewport = cx.update(|window, _| window.viewport_size());
+        let _ = cx.draw(point(px(0.), px(0.)), viewport, |_, _| app.clone());
+
+        cx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.on_sidebar_preview_down(&crate::SidebarPreviewDown, window, cx);
+                app.on_sidebar_preview_up(&crate::SidebarPreviewUp, window, cx);
+            });
+        });
+        assert_eq!(
+            app.read_with(cx, |app, _| app.session_card_scroll.offset().y),
+            px(0.),
+            "a chord with nothing on screen must not scroll an invisible view"
+        );
+    }
+
     #[gpui::test]
     fn session_card_summary_is_bounded_for_multiline_text(cx: &mut gpui::TestAppContext) {
         let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(960.), px(640.)));
         let theme = Theme::for_id(crate::theme::ThemeId::Orbit);
         let mut hover = SessionTooltip {
             title: "Session".into(),
@@ -6213,7 +6754,7 @@ mod tests {
             cx.draw(
                 point(px(0.), px(0.)),
                 gpui::size(px(960.), px(640.)),
-                |_, _| session_card(hover, &theme).into_any_element(),
+                |_, cx| session_card_probe(hover, &theme, None, cx),
             );
             cx.debug_bounds("session-card-summary")
         };
@@ -6226,8 +6767,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn session_card_bounds_provider_rows_and_shows_overflow(cx: &mut gpui::TestAppContext) {
+    fn session_card_all_provider_rows_remain_scrollable(cx: &mut gpui::TestAppContext) {
         let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(960.), px(640.)));
         let theme = Theme::for_id(crate::theme::ThemeId::Orbit);
         let mut hover = SessionTooltip {
             title: "Session".into(),
@@ -6249,9 +6791,9 @@ mod tests {
             cx.draw(
                 point(px(0.), px(0.)),
                 gpui::size(px(960.), px(640.)),
-                |_, _| session_card(hover, &theme).into_any_element(),
+                |_, cx| session_card_probe(hover, &theme, None, cx),
             );
-            assert!(cx.debug_bounds("session-provider-overflow").is_some());
+            assert!(cx.debug_bounds("session-card-providers").is_some());
             cx.debug_bounds("session-tooltip").unwrap().size.height
         };
         let four_height = draw(cx, &hover);
@@ -6262,7 +6804,101 @@ mod tests {
                 model: Some("model".into()),
             },
         );
-        assert_eq!(draw(cx, &hover), four_height);
+        assert!(draw(cx, &hover) >= four_height);
+        assert!(draw(cx, &hover) <= px(640.));
+    }
+
+    /// Exercise the real GPUI layout, including unbroken machine text, rather
+    /// than estimating text width. Optional groups must not leave empty slots.
+    #[gpui::test]
+    fn session_card_long_metadata_stays_grouped_inside_the_frame(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(960.), px(640.)));
+        for palette in [
+            crate::theme::ThemeId::Orbit,
+            crate::theme::ThemeId::OrbitLight,
+        ] {
+            let theme = Theme::for_id(palette);
+            let mut hover = SessionTooltip {
+                title: "A session with a longer title to inspect".into(),
+                summary: None,
+                shortcut: Some("Open ⌘2".into()),
+                workspace: "A workspace with a long descriptive name".into(),
+                branch: Some(format!("feature/{}", "long-branch-".repeat(8)).into()),
+                ahead: Some("↑12".into()),
+                behind: Some("↓3".into()),
+                path: format!(
+                    "/Users/developer/projects/{}",
+                    "nested-directory/".repeat(6)
+                )
+                .into(),
+                providers: (0..3)
+                    .map(|index| sessions::SessionProvider {
+                        provider: format!("provider-{index}"),
+                        model: Some("long-model-identifier-".repeat(80)),
+                    })
+                    .collect(),
+            };
+            cx.draw(
+                point(px(0.), px(0.)),
+                gpui::size(px(960.), px(640.)),
+                |_, cx| session_card_probe(&hover, &theme, None, cx),
+            );
+            let card = cx.debug_bounds("session-tooltip").unwrap();
+            let location = cx.debug_bounds("session-card-location").unwrap();
+            let path = cx.debug_bounds("session-card-path").unwrap();
+            let branch = cx.debug_bounds("session-card-branch").unwrap();
+            let providers = cx.debug_bounds("session-card-providers").unwrap();
+            let shortcut = cx.debug_bounds("session-card-shortcut").unwrap();
+            assert_eq!(card.size.width, tooltip::max_width(&theme) * 1.5);
+            assert!(card.size.height <= px(640.));
+            for bounds in [location, path, branch, providers, shortcut] {
+                assert!(
+                    bounds.left() >= card.left() && bounds.right() <= card.right(),
+                    "{bounds:?} outside {card:?}"
+                );
+                // The scroll body retains complete values beyond the viewport.
+            }
+            assert!(path.bottom() <= branch.top());
+            let group_gap = DynamicSpacing::Base12.px(&theme) - px(1.);
+            assert!(providers.top() - location.bottom() >= group_gap);
+            assert!(shortcut.top() - providers.bottom() >= group_gap);
+
+            for provider in &mut hover.providers {
+                provider.model = Some("short-model".into());
+            }
+            let short_cx = cx.add_empty_window();
+            short_cx.simulate_resize(gpui::size(px(960.), px(640.)));
+            short_cx.draw(
+                point(px(0.), px(0.)),
+                gpui::size(px(960.), px(640.)),
+                |_, cx| session_card_probe(&hover, &theme, None, cx),
+            );
+            assert!(
+                providers.size.height
+                    > short_cx
+                        .debug_bounds("session-card-providers")
+                        .unwrap()
+                        .size
+                        .height,
+                "long model labels wrap instead of losing their full values"
+            );
+
+            hover.branch = None;
+            hover.ahead = None;
+            hover.behind = None;
+            hover.providers.clear();
+            hover.shortcut = None;
+            cx.draw(
+                point(px(0.), px(0.)),
+                gpui::size(px(960.), px(640.)),
+                |_, cx| session_card_probe(&hover, &theme, None, cx),
+            );
+            assert!(cx.debug_bounds("session-card-branch").is_none());
+            assert!(cx.debug_bounds("session-card-providers").is_none());
+            assert!(cx.debug_bounds("session-card-shortcut").is_none());
+            assert!(cx.debug_bounds("session-tooltip").unwrap().size.height < card.size.height);
+        }
     }
 
     #[gpui::test]

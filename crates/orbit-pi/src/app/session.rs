@@ -1012,6 +1012,14 @@ impl OrbitApp {
             self.respond_to_approval(None, window, cx);
             return;
         }
+        // The composer's right-click spelling menu sits above everything it
+        // belongs to, so Escape closes it before the autocomplete menu, the
+        // composer's own pickers, or a running run.
+        if self.input.read(cx).is_spell_menu_open() {
+            self.input
+                .update(cx, |input, cx| input.close_spell_menu(cx));
+            return;
+        }
         if self.autocomplete.borrow().open {
             self.autocomplete_dismissed = true;
             cx.notify();
@@ -3674,7 +3682,7 @@ impl OrbitApp {
 
     /// The keyboard/menu route to the sidebar toggle (cmd/ctrl-b, View ▸
     /// Toggle Sidebar). Shares [`Self::toggle_sidebar`] with the titlebar
-    /// button, so both animate the same slide generation.
+    /// button, so both slide the same panel.
     pub(super) fn on_toggle_sidebar_action(
         &mut self,
         _: &crate::ToggleSidebar,
@@ -3685,14 +3693,13 @@ impl OrbitApp {
         cx.notify();
     }
 
-    /// Flip the sessions sidebar and bump the slide generation, so the render
-    /// animates the change (and every open→close→open cycle re-animates).
-    /// Hiding the sidebar while it holds keyboard focus hands focus back to
-    /// the composer — a clipped column must never swallow typing.
+    /// Flip the sessions sidebar. The render drives its slide from the panel's
+    /// own open state (`motion::panel::slide`), so the change is all this has to
+    /// commit. Hiding the sidebar while it holds keyboard focus hands focus back
+    /// to the composer — a clipped column must never swallow typing.
     pub(super) fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let had_focus = window.focused(cx) == Some(self.sidebar_focus.clone());
         self.sidebar_visible = !self.sidebar_visible;
-        self.sidebar_slide_gen = self.sidebar_slide_gen.wrapping_add(1);
         if !self.sidebar_visible {
             self.sidebar_cursor = None;
             if had_focus {

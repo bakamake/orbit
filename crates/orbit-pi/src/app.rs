@@ -315,6 +315,23 @@ pub(crate) enum QuitPlan {
     Wait,
 }
 
+/// The occupant of the right dock: Review (or one of its subagent tabs), the
+/// Explorer, or session details. They are mutually exclusive by construction —
+/// opening one closes the others — so the slot holds at most one at a time.
+///
+/// The app remembers the last occupant because a dock that is closing keeps
+/// painting its own content through the slide (`motion::panel::slide`): by the
+/// time the width is moving, every `*_visible` flag is already false, and the
+/// slot still has to know which card is on its way out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum RightDock {
+    #[default]
+    None,
+    Explorer,
+    Review,
+    Details,
+}
+
 pub(crate) use crate::ui::dialog::{ModalFocus, ReturnFocus};
 
 pub struct OrbitApp {
@@ -388,11 +405,10 @@ pub struct OrbitApp {
     /// Re-record the arrangement whenever a panel opens or closes, so the next
     /// launch lands in the same shape.
     _layout_subs: Vec<Subscription>,
-    /// Bumped on every sidebar toggle. The render keys its slide animation on
-    /// it, so an open→close→open cycle animates every time (a boolean key
-    /// would let the repeat skip) while the first frame — generation 0 — draws
-    /// the settled state with no launch animation.
-    sidebar_slide_gen: u64,
+    /// Which dock last held the right slot. A dock that is closing keeps
+    /// painting its own content while the slot slides shut (see
+    /// `motion::panel::slide`), so the card never blanks on the way out.
+    right_dock_slot: RightDock,
     /// Whether a feature page (Files / Git / Usage / AI Review) was open on
     /// the previous frame. A full-page Review pane yields only to a page that
     /// *opens* under it, never to one that was already there when the reader
@@ -820,8 +836,15 @@ pub struct OrbitApp {
     /// Session whose hover card is visible. The card is pinned to that row,
     /// not to the pointer.
     session_card: Option<PathBuf>,
-    /// Session the pointer is on, while the hover delay has not elapsed.
+    /// Session row the pointer is on (also owns the initial hover delay).
     session_card_wait: Option<PathBuf>,
+    /// Popup hover is independent: GPUI may enter it before leaving the row.
+    session_card_popup_hover: Option<PathBuf>,
+    /// Where the session preview is scrolled to. The card is the only place a
+    /// keyboard reader sees a session's full path and provider list, and the
+    /// wheel is not available to them, so the sidebar's Page Up / Page Down
+    /// move this handle.
+    session_card_scroll: ScrollHandle,
     /// Cancels a pending hover card when the pointer leaves the row.
     session_card_task: gpui::Task<()>,
     /// Open row-actions menu on a workspace group header (which workspace's
@@ -1333,6 +1356,7 @@ pub struct OrbitApp {
     /// closed by hand. A provider with no entry follows the page's default
     /// (open for the active provider and while a filter narrows its models).
     provider_models_open: HashMap<String, bool>,
+    provider_model_filters: HashMap<String, (Entity<ComposerInput>, Subscription)>,
     /// True while the Providers & models page's "Update model list" runs pi's
     /// catalog refresh and reloads the agent.
     models_refreshing: bool,
@@ -1882,6 +1906,7 @@ impl OrbitApp {
                 .with_key_context("Composer ChatComposer")
                 .with_autocomplete(autocomplete.clone())
                 .with_prompt_history(prompt_history.clone())
+                .with_spell_check(true)
                 .with_attachments(true)
         });
         // The chat input is the workbench's home tab stop; every other
@@ -2488,7 +2513,7 @@ impl OrbitApp {
             wallpaper_library_generation: 0,
             sidebar_list: ListState::new(0, ListAlignment::Top, px(44.)),
             sidebar_visible: true,
-            sidebar_slide_gen: 0,
+            right_dock_slot: RightDock::None,
             feature_open_last: false,
             backdrop_live: false,
             backdrop_clock: None,
@@ -2660,6 +2685,8 @@ impl OrbitApp {
             sidebar_sort_menu: false,
             session_card: None,
             session_card_wait: None,
+            session_card_popup_hover: None,
+            session_card_scroll: ScrollHandle::new(),
             session_card_task: gpui::Task::ready(()),
             workspace_menu: None,
             worktree_config,
@@ -2870,6 +2897,7 @@ impl OrbitApp {
             _provider_filter_sub: provider_filter_sub,
             models_favorites_only: false,
             provider_models_open: HashMap::new(),
+            provider_model_filters: HashMap::new(),
             models_refreshing: false,
             skills: Vec::new(),
             subagents: Vec::new(),
@@ -4889,6 +4917,8 @@ mod sidebar_search_tests;
 mod sidebar_sort_tests;
 #[cfg(test)]
 mod sidepane_full_width_tests;
+#[cfg(test)]
+mod spellcheck_ui_tests;
 #[cfg(test)]
 mod stale_error_tests;
 #[cfg(test)]

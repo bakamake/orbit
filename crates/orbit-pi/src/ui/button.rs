@@ -17,7 +17,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window,
 };
 
-use crate::motion::Hover;
+use crate::motion::{Hover, Hovered};
 use crate::theme::{
     tokens::{button, ButtonSize, RaisedExt},
     Theme,
@@ -192,7 +192,6 @@ pub(crate) struct Button {
     leading: Option<AnyElement>,
     disabled: bool,
     loading: bool,
-    fade: bool,
     tip: Option<SharedString>,
     focus: Option<gpui::FocusHandle>,
 }
@@ -214,7 +213,6 @@ impl Button {
             leading: None,
             disabled: false,
             loading: false,
-            fade: false,
             tip: None,
             focus: None,
         }
@@ -282,11 +280,11 @@ impl Button {
 
     /// The finished button with no handler — for a caller that wires its own
     /// event (and is then responsible for honouring `disabled`).
-    pub(crate) fn render(self, theme: &Theme) -> Stateful<Div> {
+    pub(crate) fn render(self, theme: &Theme) -> Hovered<Stateful<Div>> {
         let can_act = self.can_act();
-        let id = self.id;
-        let mut el = button_frame(div().id(id.clone()), theme, self.size)
-            .group(BUTTON_GROUP);
+        let id = self.id.clone();
+        let name = SharedString::from(format!("{id}"));
+        let mut el = button_frame(div().id(id.clone()), theme, self.size).group(BUTTON_GROUP);
         if let Some(focus) = &self.focus {
             el = el.track_focus(focus);
         }
@@ -295,7 +293,11 @@ impl Button {
         } else {
             el.font_weight(FontWeight::MEDIUM)
         };
-        let swap_hover = !(self.fade && self.variant.fade(theme).is_some());
+        // A variant with a fade descriptor paints its hover through the fade
+        // below; only the ones that change more than a fill (a hairline, an
+        // accent wash) keep the one-frame swap.
+        let hover = self.variant.fade(theme);
+        let swap_hover = hover.is_none();
         let el = if can_act {
             variant_treatment(el, theme, self.variant, swap_hover).cursor_pointer()
         } else if self.loading {
@@ -337,8 +339,17 @@ impl Button {
         // The label gives way before the frame does: in a button squeezed by
         // its row (a half-width sidebar action, a long translation) it ends
         // in an ellipsis instead of spilling past the edge; the icon stays.
-        el.children(leading)
-            .children(self.label.map(|label| div().min_w_0().truncate().child(label)))
+        let el = el.children(leading).children(
+            self.label
+                .map(|label| div().min_w_0().truncate().child(label)),
+        );
+        // A button that cannot act has nothing to fade to.
+        let hover = if can_act {
+            hover.unwrap_or_else(Hover::none)
+        } else {
+            Hover::none()
+        };
+        crate::motion::fade(el, name, theme, hover)
     }
 
     /// The button acting on a click (press and release on the button).
@@ -346,7 +357,7 @@ impl Button {
         self,
         theme: &Theme,
         handler: impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static,
-    ) -> Stateful<Div> {
+    ) -> Hovered<Stateful<Div>> {
         let can_act = self.can_act();
         let el = self.render(theme);
         if can_act {
@@ -362,7 +373,7 @@ impl Button {
         self,
         theme: &Theme,
         handler: impl Fn(&MouseUpEvent, &mut Window, &mut gpui::App) + 'static,
-    ) -> Stateful<Div> {
+    ) -> Hovered<Stateful<Div>> {
         let can_act = self.can_act();
         let el = self.render(theme);
         if can_act {
@@ -378,7 +389,7 @@ impl Button {
         self,
         theme: &Theme,
         handler: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
-    ) -> Stateful<Div> {
+    ) -> Hovered<Stateful<Div>> {
         let can_act = self.can_act();
         let el = self.render(theme);
         if can_act {
@@ -392,21 +403,15 @@ impl Button {
     /// than swapped on one frame — the settings and session-panel register.
     /// `attach` wires the caller's events and runs only while the button can
     /// act; a variant with no fade ([`ButtonVariant::fade`]) keeps its swap.
+    /// Kept for its call sites: [`Self::render`] already fades, so this only
+    /// lets a caller attach handlers to the control before it becomes an
+    /// element.
     pub(crate) fn faded(
-        mut self,
+        self,
         theme: &Theme,
-        attach: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
+        attach: impl FnOnce(Hovered<Stateful<Div>>) -> Hovered<Stateful<Div>>,
     ) -> AnyElement {
-        self.fade = true;
-        let can_act = self.can_act();
-        let fade = self.variant.fade(theme).filter(|_| can_act);
-        let name = SharedString::from(format!("{}", self.id));
-        let el = self.render(theme);
-        let el = if can_act { attach(el) } else { el };
-        match fade {
-            Some(hover) => crate::motion::hover(el, name, theme, hover),
-            None => el.into_any_element(),
-        }
+        attach(self.render(theme)).into_any_element()
     }
 }
 
@@ -575,7 +580,6 @@ pub(crate) struct IconButton {
     tip: Option<SharedString>,
     disabled: bool,
     open: bool,
-    fade: bool,
 }
 
 impl IconButton {
@@ -590,7 +594,6 @@ impl IconButton {
             tip: None,
             disabled: false,
             open: false,
-            fade: false,
         }
     }
 
@@ -636,19 +639,16 @@ impl IconButton {
     }
 
     /// The finished button with no handler.
-    pub(crate) fn render(self, theme: &Theme) -> Stateful<Div> {
+    pub(crate) fn render(self, theme: &Theme) -> Hovered<Stateful<Div>> {
+        // The fade keys off the button's own id, so two icon buttons in one row
+        // never share a clock.
+        let name = SharedString::from(format!("{}", self.id));
         let el = icon_button_frame(div().id(self.id), theme, self.size).group(BUTTON_GROUP);
         let el = if self.disabled {
             el.cursor_not_allowed()
         } else {
-            let el = el.cursor_pointer();
-            let el = match (self.fade, self.variant) {
-                // `faded` paints the hover itself.
-                (true, _) => el,
-                (false, IconButtonVariant::Ghost) => el.hover_state(theme),
-                (false, IconButtonVariant::Glass) => el.hover_on_glass(theme),
-            };
-            el.pressed_state(theme, PressedRamp::Wash)
+            // The fade owns the hover, so the frame adds none.
+            el.cursor_pointer().pressed_state(theme, PressedRamp::Wash)
         };
         let ink = if self.disabled {
             theme.text_disabled
@@ -661,17 +661,24 @@ impl IconButton {
             Some(tip) => el.tip(tip),
             None => el,
         };
-        match self.glyph {
+        let el = match self.glyph {
             Some(glyph) => el.child(glyph),
             None => el.child(icon(self.icon, self.size.icon_size().px(theme), ink)),
-        }
+        };
+        // A disabled control cannot act, so it has nothing to fade to.
+        let hover = if self.disabled {
+            Hover::none()
+        } else {
+            faded_icon_hover(theme, self.variant, self.open)
+        };
+        crate::motion::fade(el, name, theme, hover)
     }
 
     pub(crate) fn on_click(
         self,
         theme: &Theme,
         handler: impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static,
-    ) -> Stateful<Div> {
+    ) -> Hovered<Stateful<Div>> {
         let enabled = !self.disabled;
         let el = self.render(theme);
         if enabled {
@@ -685,7 +692,7 @@ impl IconButton {
         self,
         theme: &Theme,
         handler: impl Fn(&MouseUpEvent, &mut Window, &mut gpui::App) + 'static,
-    ) -> Stateful<Div> {
+    ) -> Hovered<Stateful<Div>> {
         let enabled = !self.disabled;
         let el = self.render(theme);
         if enabled {
@@ -699,7 +706,7 @@ impl IconButton {
         self,
         theme: &Theme,
         handler: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
-    ) -> Stateful<Div> {
+    ) -> Hovered<Stateful<Div>> {
         let enabled = !self.disabled;
         let el = self.render(theme);
         if enabled {
@@ -714,26 +721,15 @@ impl IconButton {
     /// `attach` adds the caller's handler and any extras (a reveal-on-row-hover
     /// opacity, an anchored popover child); it runs only while the button can
     /// act.
+    /// Kept for its call sites: [`Self::render`] already fades, so this only
+    /// lets a caller attach handlers to the control before it becomes an
+    /// element.
     pub(crate) fn faded(
-        mut self,
+        self,
         theme: &Theme,
-        attach: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
+        attach: impl FnOnce(Hovered<Stateful<Div>>) -> Hovered<Stateful<Div>>,
     ) -> AnyElement {
-        let enabled = !self.disabled;
-        let open = self.open;
-        let variant = self.variant;
-        let name = match &self.id {
-            ElementId::Name(name) => name.clone(),
-            other => SharedString::from(format!("{other}")),
-        };
-        // Render without the swap: the fade below owns the hover.
-        self.fade = true;
-        let el = self.render(theme);
-        if !enabled {
-            return el.into_any_element();
-        }
-        let el = attach(el);
-        crate::motion::hover(el, name, theme, faded_icon_hover(theme, variant, open))
+        attach(self.render(theme)).into_any_element()
     }
 }
 

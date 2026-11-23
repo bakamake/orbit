@@ -10136,44 +10136,53 @@ fn render_code_block(
         } else {
             tr!("transcript_view.show_remaining_lines", count = hidden)
         };
+        // The hover crosses from `text_secondary` to `text_primary` over the
+        // wash, which is exactly `Hover::row` — the fade the row layer uses.
+        // The click goes on the element itself: a fade wraps the element, so
+        // it is the last *styling* call and the children attach to the wrapper.
+        let fold = div()
+            .id(ElementId::NamedInteger(
+                "code-fold".into(),
+                (ix as u64) << 32 | block_key as u64,
+            ))
+            .w_full()
+            .h(px(30.))
+            .px(DynamicSpacing::Base12.px(&theme))
+            .border_t_1()
+            .border_color(theme.hairline())
+            .flex()
+            .items_center()
+            .gap(DynamicSpacing::Base06.px(&theme))
+            .cursor_pointer()
+            .text_size(TextSize::Small.px(&theme))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.text_secondary)
+            .on_click(move |_, _, cx| {
+                let key = (ix, id_namespace, block_ix);
+                let mut open = expanded_blocks.borrow_mut();
+                if !open.remove(&key) {
+                    open.insert(key);
+                }
+                drop(open);
+                scroller.remeasure_toggle(ix);
+                cx.refresh_windows();
+            });
         card = card.child(
-            div()
-                .id(ElementId::NamedInteger(
-                    "code-fold".into(),
-                    (ix as u64) << 32 | block_key as u64,
-                ))
-                .w_full()
-                .h(px(30.))
-                .px(DynamicSpacing::Base12.px(&theme))
-                .border_t_1()
-                .border_color(theme.hairline())
-                .flex()
-                .items_center()
-                .gap(DynamicSpacing::Base06.px(&theme))
-                .cursor_pointer()
-                .text_size(TextSize::Small.px(&theme))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.text_secondary)
-                .hover_state(&theme)
-                .child(label)
-                .child(div().flex_1())
-                .child(disclosure_chevron(
-                    format!("code-caret-{ix}-{block_ix}"),
-                    expanded,
-                    IconSize::XSmall.px(&theme),
-                    theme.text_muted,
-                    &theme,
-                ))
-                .on_click(move |_, _, cx| {
-                    let key = (ix, id_namespace, block_ix);
-                    let mut open = expanded_blocks.borrow_mut();
-                    if !open.remove(&key) {
-                        open.insert(key);
-                    }
-                    drop(open);
-                    scroller.remeasure_toggle(ix);
-                    cx.refresh_windows();
-                }),
+            crate::motion::fade(
+                fold,
+                format!("code-fold-{ix}-{block_ix}"),
+                &theme,
+                Hover::row(&theme),
+            )
+            .child(label)
+            .child(div().flex_1())
+            .child(disclosure_chevron(
+                format!("code-caret-{ix}-{block_ix}"),
+                expanded,
+                IconSize::XSmall.px(&theme),
+                theme.text_muted,
+                &theme,
+            )),
         );
     }
 
@@ -10367,7 +10376,7 @@ fn render_mermaid_block(
     } else {
         tr!("transcript_view.show_source")
     };
-    let toggle = div()
+    let toggle_body = div()
         .id(ElementId::NamedInteger(
             "diagram-source".into(),
             (ix as u64) << 32 | block_key as u64,
@@ -10385,16 +10394,6 @@ fn render_mermaid_block(
         .text_size(TextSize::Small.px(&theme))
         .font_weight(FontWeight::MEDIUM)
         .text_color(theme.text_secondary)
-        .hover_state(&theme)
-        .child(toggle_label)
-        .child(div().flex_1())
-        .child(disclosure_chevron(
-            format!("mermaid-caret-{ix}-{block_ix}"),
-            showing_source,
-            IconSize::XSmall.px(&theme),
-            theme.text_muted,
-            &theme,
-        ))
         .on_click(move |_, _, cx| {
             let key = (ix, id_namespace, block_ix);
             let mut open = expanded_blocks.borrow_mut();
@@ -10405,6 +10404,21 @@ fn render_mermaid_block(
             scroller.remeasure_toggle(ix);
             cx.refresh_windows();
         });
+    let toggle = crate::motion::fade(
+        toggle_body,
+        format!("diagram-source-{ix}-{block_ix}"),
+        &theme,
+        Hover::row(&theme),
+    )
+    .child(toggle_label)
+    .child(div().flex_1())
+    .child(disclosure_chevron(
+        format!("mermaid-caret-{ix}-{block_ix}"),
+        showing_source,
+        IconSize::XSmall.px(&theme),
+        theme.text_muted,
+        &theme,
+    ));
 
     code_block_surface(div().w_full().min_w_0(), theme)
         .overflow_hidden()
@@ -10919,7 +10933,7 @@ pub(crate) fn render_changed_files(
             tr!("transcript_view.show_more_files", count = remaining)
         };
         let clipped = expanded && files.len() > EXPANDED_PREVIEW_LIMIT;
-        let mut toggle = div()
+        let toggle_body = div()
             .id(ElementId::NamedInteger(
                 "changed-files-toggle".into(),
                 message_ix as u64,
@@ -10933,8 +10947,18 @@ pub(crate) fn render_changed_files(
             .text_size(TextSize::Small.px(&theme))
             .font_weight(FontWeight::MEDIUM)
             .text_color(theme.text_secondary)
-            .hover_state(&theme)
-            .child(label);
+            .on_click(move |_, _, cx| {
+                toggle_index(&expanded_files, message_ix);
+                scroller.remeasure_toggle(message_ix);
+                cx.refresh_windows();
+            });
+        let mut toggle = crate::motion::fade(
+            toggle_body,
+            format!("changed-files-toggle-{message_ix}"),
+            &theme,
+            Hover::row(&theme),
+        )
+        .child(label);
         if clipped {
             toggle = toggle.child(
                 div()
@@ -10951,22 +10975,13 @@ pub(crate) fn render_changed_files(
                     )),
             );
         }
-        card = card.child(
-            toggle
-                .child(div().flex_1())
-                .child(disclosure_chevron(
-                    format!("files-caret-{message_ix}"),
-                    expanded,
-                    IconSize::XSmall.px(&theme),
-                    theme.text_muted,
-                    &theme,
-                ))
-                .on_click(move |_, _, cx| {
-                    toggle_index(&expanded_files, message_ix);
-                    scroller.remeasure_toggle(message_ix);
-                    cx.refresh_windows();
-                }),
-        );
+        card = card.child(toggle.child(div().flex_1()).child(disclosure_chevron(
+            format!("files-caret-{message_ix}"),
+            expanded,
+            IconSize::XSmall.px(&theme),
+            theme.text_muted,
+            &theme,
+        )));
     }
 
     card

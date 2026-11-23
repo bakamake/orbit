@@ -516,6 +516,10 @@ pub struct UiPrefs {
     pub motion: MotionPreference,
     /// Enter's delivery mode while the agent is working (Orbit-only).
     pub composer_send_mode: crate::composer_send::SendMode,
+    /// Underline misspelled words in the composer while typing (macOS; the
+    /// checker is AppKit's `NSSpellChecker`). Off-platform builds ignore it —
+    /// `spellcheck::enabled` is the single gate.
+    pub spell_check: bool,
     /// What the window's close button does (#131).
     pub close_behavior: crate::tray::CloseBehavior,
 }
@@ -538,6 +542,10 @@ impl Default for UiPrefs {
             spacing_density: 100,
             motion: MotionPreference::System,
             composer_send_mode: crate::composer_send::SendMode::default(),
+            // On by default, like a native text view: the exclusion rules keep
+            // code and paths out, so a prompt is only marked where it reads as
+            // English.
+            spell_check: true,
             close_behavior: crate::tray::CloseBehavior::platform_default(),
         }
     }
@@ -643,6 +651,9 @@ impl UiPrefs {
         {
             prefs.close_behavior = behavior;
         }
+        if let Some(on) = value.get("spell_check").and_then(Value::as_bool) {
+            prefs.spell_check = on;
+        }
         prefs
     }
 
@@ -666,6 +677,7 @@ impl UiPrefs {
             // build reads this bool and ORs the OS read exactly as it used to.
             "reduce_motion": self.motion == MotionPreference::Reduced,
             "composer_send_mode": self.composer_send_mode.as_str(),
+            "spell_check": self.spell_check,
             "close_behavior": self.close_behavior.as_str(),
         })
     }

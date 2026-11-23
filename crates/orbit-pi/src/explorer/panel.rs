@@ -1703,9 +1703,10 @@ fn loading_state(theme: &Theme) -> AnyElement {
 
 impl Render for ProjectPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.open {
-            return div().into_any_element();
-        }
+        // No `!self.open` short circuit: the app decides when the panel is in
+        // the tree. While it is closing the dock slides shut over 200 ms
+        // (`motion::panel::slide`), and returning nothing here would leave an
+        // empty frame travelling to zero.
         if self
             .focus_subscriptions
             .as_ref()

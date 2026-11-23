@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Hovers fade across the component layer.** `motion::fade` wraps a control and still accepts
+everything a chain does after it — styling, handlers, children — because gpui's `Styled`,
+`InteractiveElement` and `StatefulInteractiveElement` each have one required hook and several
+hundred default methods built on it. So the components could adopt it without changing a
+single call site: every `Button` and `IconButton` (about 260 call sites), every Explorer and
+review tree row, the flat top-bar controls, and the transcript's three block toggles now
+cross-fade their fill and ink instead of swapping on one frame. Variants whose hover changes
+more than a fill (Tinted, Danger, Destructive, Glass) keep the one-frame swap, because their
+hover is not a fill.
+
+- **A hover fade can take children now.** A fade has to wrap the element it fades, which made
+it the last call in a chain: every call site had to move its `.child(…)` calls above it, and
+that is why most hovering controls in the app still swap on one frame. `motion::fade` collects
+the children instead, so a site converts by wrapping its chain — the transcript's code-block
+fold, its diagram-source toggle and its changed-files toggle are the first. `motion::hover` is
+the same implementation as a leaf, so its existing adopters are unchanged.
+
+- **The session preview can be read without a mouse.** The card is the only place the
+sidebar shows a session's full path and provider list, and it can be taller than the
+window — but its overflow was pointer-only, so a keyboard reader could never reach the
+end of it. Page Up / Page Down now page the card while it is showing (the pointer's, or
+the one the keyboard cursor paints), stopping at both ends. It scrolls the same handle
+the wheel does, and a dismissed card opens at the top again.
+
+- **The About page's header no longer pushes its board off the screen.** The identity
+block put its text column in a row without letting it grow, so the column was sized to
+its max-content — for a nested flex column, the 98px title. The subtitle wrapped to five
+lines and the version line to three, the header grew to roughly 1,500px, and the board
+(updates, runtime, source) began about 1,600px down a 640px-tall window's scroll area;
+the mark also had no definite box, so its width came from the decoded asset and the row
+reflowed when it arrived. The column now takes the row's remaining width, and the mark is
+a 48px box. Every other Settings page was unaffected, because there the same column sits
+in a column parent, where a flex item stretches.
+
+- **Panels slide instead of snapping.** The sessions sidebar, Review (and a subagent
+tab), the Explorer, session details and the bottom terminal strip now ease their own
+extent when they open or close — a width for the docks, a height for the terminal — and
+the space beside or above them is given back on the same curve. The sidebar's slide was
+hand-rolled on a counter bumped by the toggle, which could not be interrupted: closing
+and reopening quickly restarted it from the end. All of them now share one primitive
+(`motion::panel::slide`) built on the motion layer's retargetable `Transition`, so a
+panel caught mid-slide resumes from the extent on screen. A closing panel stays mounted
+for the slide and leaves the tree once it has arrived, so a closed dock still costs
+nothing; the sessions sidebar stays mounted while closed because its focus handle has to
+be in the tree for ⌘⇧B. The terminal was the case that had never had a chance to
+animate: its strip was gated on "visible", which folded in its open flag, so closing it
+unmounted the row on the same frame. The top bar's leading pad and the titlebar controls
+ride the same clock as the sidebar's edge rather than animating their own. Reduce Motion
+takes the end state on the frame it changes. The Git page still snaps: it replaces the
+whole column rather than sitting beside it, so it needs a page entrance, not a width.
+
+- **Pages and Settings sections arrive instead of appearing.** Opening Git, Usage, Files,
+Worktrees, an expanded terminal or any Settings section now fades its content in
+(`motion::arrive`, on the layout role) instead of replacing the previous one on a single
+frame. Only the content fades, over the card's own canvas — the card, its gutter and the
+Settings nav never move — so nothing flashes the wallpaper through the swap, and the page
+never travels: an offset would reflow the page under the reader's cursor for a picture
+that was already gone. The destination, not the moment, names the entrance, so swapping
+between two pages never inherits the other's finished fade, and typing in Settings →
+Search does not re-fade on every keystroke. A right-dock tab switch stays instant: it
+swaps between transcripts, and the transcript takes no entry animation. Reduce Motion
+paints the page opaque on the frame it opens.
+
+- **Spelling marks in the prompt composer.** Misspelled words in the composer
+  get a wavy underline once you pause typing, drawn the way a native text view
+  draws them. Orbit paints its own text, so macOS never spell-checked it; the
+  new `spellcheck` module asks `NSSpellChecker` for the misspelled words and
+  marks only prose — fenced and inline code, paths, identifiers, commands and
+  `@`-mentions are skipped, and the run lengths are untouched so the caret,
+  selection and wrapping never move. There is no auto-correction and no grammar
+  checking (a prompt is imperatives and code, which Apple's grammar checker
+  flags even when it is right). Right-click a marked word for the checker's
+  suggestions (up to five, best first) and **Learn spelling** to add it to the
+  macOS dictionary; the menu opens only on a marked word, so the squiggle and
+  the menu never disagree. Settings → Agent → Check spelling turns it off.
+  macOS only — Windows and Linux have no checker in this stack.
+
+- **Clearer session previews.** Sidebar hover and keyboard preview cards group
+  the title, location and providers, give branch/divergence their own row, show
+  paths in monospace, align metadata icons/text, and separate the shortcut hint into
+  a quiet footer. Viewport-bounded scrolling keeps full paths, branches and all
+  provider/model labels readable without truncation; a short pointer handoff grace
+  allows entering the popup to scroll. The keyboard preview route is retained.
+
+- **Search within a provider's models.** Each expanded Models section has its
+  own search field for model ids and names. It keeps your query when collapsed;
+  Show all / Hide all still apply to the whole section, not just search results.
+
 - **Git activity at a glance.** The Git button at the bottom of the sidebar
   shows a dot when you have changed files, or when new issues or pull requests
   were opened on GitHub since you last looked; hover it to see which. On the

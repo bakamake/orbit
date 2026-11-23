@@ -230,8 +230,8 @@ does today, so this section never describes a surface that has not shipped.
 | Density over air: 28px rows, 13–14px body | `ButtonSize::Medium` 28px, `list_item` rows, `TextSize::Default` | Shipped |
 | Accent and action are separate roles | `accent` marks identity; primary fills read `action`, which a palette may key to the accent | Shipped |
 | Restrained UI type, 400–600 | `TextSize` 11–16 at default settings; a separate monospace family serves code | Shipped |
-| Motion is fast and decelerating | `Motion` roles (`Interaction` / `Layout` / `Travel`) plus `motion::hover` · `control` · `state` · `enter` · `disclosure_chevron` · `switch` | Shipped in §Motion System; the hover fade covers the whole sidebar (rows, workspace headers, group rows, menu entries, every control), the Settings back/search/action controls, the transcript copy button, the changelog link and the caption buttons; every other pane still swaps on one frame |
-| Interactive surfaces share state treatments | `interaction::InteractionState` resolves colours; `motion::hover` fades them | Primitives shipped and press treatments adopted; the sidebar and part of Settings fade their hovers, the rest of the app still swaps on one frame (see §The interaction layer) |
+| Motion is fast and decelerating | `Motion` roles (`Interaction` / `Layout` / `Travel`) plus `motion::hover` · `fade` · `control` · `state` · `enter` · `slide` · `disclosure_chevron` · `switch` | Shipped in §Motion System; the hover fade covers the whole sidebar (rows, workspace headers, group rows, menu entries, every control), the Settings back/search/action controls, the transcript copy button and its three block toggles, the changelog link and the caption buttons; the sessions sidebar and the right dock (Review, a subagent tab, the Explorer, session details) ease their own width, and the bottom terminal strip its own height, through one slide (`motion/panel.rs`); a feature page and a Settings section fade their content in on `Layout` (`motion::arrive`) |
+| Interactive surfaces share state treatments | `interaction::InteractionState` resolves colours; `motion::hover` fades them | Primitives shipped and press treatments adopted; every button and icon button in the app, the Explorer and review tree rows, the header controls, the sidebar rows and part of Settings fade their hovers; leaf surfaces in Git, MCP, Worktrees, Subagents and the pickers still swap on one frame (see §The interaction layer) |
 | Keyboard is a first-class path | Command registry + palette; every chip has a `command()` route | Shipped |
 
 Four things Orbit deliberately does **not** take from Linear:
@@ -1185,7 +1185,25 @@ swap states instantly rather than transitioning.
 | Switch | settings toggle (`helpers::switch`) | `Interaction` | the knob travels 18px (the track's inner span) and the track crossfades `surface_elevated` → `accent` | the knob jumps |
 | Menu / popover open | anchored card, context menu | `Interaction` + travel | fade plus an 8px travel out of the anchor edge, as one card; `anchored_popover_at` (a context menu at the pointer) fades only, because it has no edge | the card appears at once |
 | Dialog open | modal card | `Layout` | the card fades in over the scrim; it cannot scale for the reason below | the card appears at once |
+| Page open | Files, Git, Usage, Worktrees, the expanded terminal, a Settings section | `Layout` | only the page's content fades, in place, over the card's own canvas (`motion::arrive`); the card, its gutter and the nav beside it never move | the page is painted opaque at once |
 | Panel open / close | sidebar, side pane, explorer, terminal, Git | `Layout` | the panel's own width; chips on its edge ride the same curve | panels snap |
+
+Shipped for the sessions sidebar, the side pane, the Explorer, session details and the
+bottom terminal strip through `motion::panel::slide`, which keeps a closing panel mounted and
+eases the extent that clips it, so the content is uncovered rather than squeezed. A panel
+that is closed and at rest leaves the tree entirely. `Anchor` picks the axis and the edge
+together — `Left`/`Right` animate a width on a row, `Bottom` a height on a column.
+
+A **page** is not a panel: opening Git, Usage, Files, Worktrees or an expanded terminal
+replaces the whole column, so there is no neighbour to take a width back from. `motion::arrive`
+fades the page's content only, in place, over the card's own canvas — the card, its gutter and
+the Settings nav never move. It does not travel, because the surface it replaced is gone on the
+same frame and gpui cannot cross-fade an element that no longer exists: what arrives is a fade
+in, not a dissolve between two pages. `an_arrival_fades_without_moving_the_surface` holds that
+down.
+
+A **dock tab switch** is deliberately still instant. It swaps between transcripts (Review's
+diff and a delegated child's), and the transcript is exempt from every entry animation.
 | Send morph | composer submit | `Travel` (state) + `Interaction` (hover) | while idle, the disabled square grows into a labelled Send button when a draft becomes sendable and folds back when cleared; width and label share a retargetable transition. While a turn runs, Stop occupies the empty slot and a draft exposes the named send lanes | the end state is drawn immediately |
 | Composer dock | first send from the new-task page | `Travel` | the composer leaves the page's centered column for the session's: the space below it closes, the column widens 800 → 960, the folder row collapses, and the transcript's ink fades in, all on one clock (`new_task::settle`) | the session frame is painted on the frame of the send |
 

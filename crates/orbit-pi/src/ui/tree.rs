@@ -14,13 +14,13 @@ use gpui::{
     Pixels, SharedString, Stateful, Styled,
 };
 
+use crate::motion::Hover;
 use crate::theme::{
     tokens::{DynamicSpacing, IconSize, Radius, TextSize},
     Theme,
 };
 use crate::ui::icon::{disclosure_chevron, icon};
 use crate::ui::row::RowState;
-use crate::ui::style::control::ControlExt;
 
 /// The left inset of a depth-0 directory row (its chevron's leading edge).
 const INDENT_BASE: f32 = 7.;
@@ -132,7 +132,7 @@ impl TreeRow {
         self
     }
 
-    pub(crate) fn render(self, theme: &Theme) -> Stateful<gpui::Div> {
+    pub(crate) fn render(self, theme: &Theme) -> crate::motion::Hovered<Stateful<gpui::Div>> {
         let directory = matches!(self.node, TreeNode::Directory { .. });
         let selected = self.state == TreeRowState::Selected;
         let mark_ink = if selected {
@@ -165,7 +165,8 @@ impl TreeRow {
             TreeRowState::Cursor => row
                 .cursor_pointer()
                 .bg(RowState::Cursor.rest_fill(theme).unwrap_or_default()),
-            TreeRowState::Rest => row.cursor_pointer().hover_state(theme),
+            // The fade at the end owns the rest state's hover.
+            TreeRowState::Rest => row.cursor_pointer(),
         };
 
         if self.guides {
@@ -221,7 +222,14 @@ impl TreeRow {
                 .children(self.trailing),
         };
 
-        row
+        // Only the resting row has a hover; a selected, cursor or editing row
+        // carries its own fill and must not cross-fade away from it.
+        let hover = if self.state == TreeRowState::Rest {
+            Hover::row(theme)
+        } else {
+            Hover::none()
+        };
+        crate::motion::fade(row, self.id, theme, hover)
     }
 }
 

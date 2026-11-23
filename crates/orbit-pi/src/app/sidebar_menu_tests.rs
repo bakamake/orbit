@@ -37,6 +37,21 @@ fn session_card_waits_and_cancels_on_leave_or_menu(cx: &mut gpui::TestAppContext
     app.update(cx, |app, cx| {
         app.hover_session_card(path.clone(), false, cx)
     });
+    cx.run_until_parked();
+    // Row leave must not close before the pointer can enter the popup.
+    cx.executor().advance_clock(Duration::from_millis(100));
+    cx.run_until_parked();
+    assert!(app.read_with(cx, |app, _| app.session_card.is_some()));
+    app.update(cx, |app, cx| app.hover_session_card(path.clone(), true, cx));
+    cx.executor().advance_clock(Duration::from_millis(300));
+    cx.run_until_parked();
+    assert!(app.read_with(cx, |app, _| app.session_card.is_some()));
+    app.update(cx, |app, cx| {
+        app.hover_session_card(path.clone(), false, cx)
+    });
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(200));
+    cx.run_until_parked();
     assert!(app.read_with(cx, |app, _| app.session_card.is_none()));
     app.update(cx, |app, cx| {
         app.sidebar_sort_menu = true;
@@ -328,7 +343,10 @@ fn task_menu_offers_branch_and_project_menu_offers_rename() {
         can_move_down: false,
         cursor: Default::default(),
     };
-    let items: Vec<_> = session_menu_items(&menu).into_iter().map(|(i, _)| i).collect();
+    let items: Vec<_> = session_menu_items(&menu)
+        .into_iter()
+        .map(|(i, _)| i)
+        .collect();
     let clone = items.iter().position(|i| *i == RowMenuItem::Clone).unwrap();
     assert_eq!(items[clone + 1], RowMenuItem::Branch);
     assert_eq!(items.last(), Some(&RowMenuItem::Delete));
@@ -387,7 +405,15 @@ fn branch_from_waits_for_the_target_session_state(cx: &mut gpui::TestAppContext)
         assert!(app.pending_session_branch.is_none());
         // A failed switch drops a branch that can no longer open.
         app.pending_session_branch = Some(PathBuf::from("/tmp/branch-target.jsonl"));
-        app.on_response("switch_session", false, None, Some("nope"), "test", &mut refresh, cx);
+        app.on_response(
+            "switch_session",
+            false,
+            None,
+            Some("nope"),
+            "test",
+            &mut refresh,
+            cx,
+        );
         assert!(app.pending_session_branch.is_none());
     });
 }

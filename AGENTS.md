@@ -155,6 +155,9 @@ crates/orbit-pi/        GPUI app — window, shell, chat, settings
                         (measure.rs);
                         see docs/mermaid.md — anything outside the subset keeps the source block
   src/composer.rs       multi-line EntityInputHandler (wraps, auto-grows, scrolls)
+  src/spellcheck.rs     composer spelling marks + right-click suggestions: which spans are
+                        prose, and the AppKit `NSSpellChecker` calls behind them
+                        (macOS; no grammar, no autocorrect)
   src/model_selector.rs model / thinking picker popover
   src/notifications.rs  background notifications + channel prefs in ~/.orbit-pi/notifications.json: desktop banners (UNUserNotificationCenter; its delegate routes a clicked banner back to the session; osascript fallback when unbundled), system alert sound, and in-app toasts (the frontmost-window stand-in for the banner)
   src/toast.rs          the toast stack model: kinds, TTLs, fade, dedupe, cap (painted by app/toast_ui.rs)
@@ -658,6 +661,7 @@ These compiled and ran against the pinned version. When in doubt, check
 | `enter` / `escape` / `up` / `down` | Confirm / deny / move | `Approval` (inline access-guard bar) |
 | `enter` / `space` | Fold / unfold the focused transcript activity summary, tool row or thought row | `ActivityToggle` |
 | `alt-up` / `alt-down` | Move the row under the cursor in the sidebar — a project group, or a session inside its project (the pointer twin is dragging a header or a session row) | `Sidebar` |
+| `pageup` / `pagedown` | Scroll the session preview while it is showing — the pointer's, or the one the cursor paints — because the arrows are already moving the row cursor. A no-op with no preview on screen | `Sidebar` |
 
 ## Pi CLI RPC protocol (official spec)
 

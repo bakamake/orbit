@@ -2799,9 +2799,10 @@ impl Render for SidePane {
                 .on_action(cx.listener(Self::on_filter_cancel))
                 .into_any_element();
         }
-        if !self.open {
-            return div().into_any_element();
-        }
+        // No `!self.open` short circuit: the app decides when the pane is in the
+        // tree. While it is closing the slot slides shut over 200 ms
+        // (`motion::panel::slide`), and a pane that returned nothing here would
+        // leave an empty frame travelling to zero.
         let theme = *theme::get(cx);
         let body = self.body(window, theme, cx);
         let header = self

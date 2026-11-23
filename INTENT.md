@@ -589,6 +589,35 @@ legacy app today:
 
 ### Implementation status (living)
 
+The prompt composer marks misspelled words with the wavy underline a native text
+view draws, once typing pauses. Orbit paints its own text, so AppKit never
+spell-checked it: `spellcheck.rs` splits a draft into prose runs (fenced and
+inline code, paths, identifiers, commands, `@`-mentions and URLs break a run and
+are never checked) and asks `NSSpellChecker` for the misspelled words in them,
+which `composer.rs` paints as a per-run wavy underline — a paint channel only,
+so the caret, selection and wrap points do not move. The check is debounced
+350 ms from `render` (every edit path reaches it through the composer's
+`revision`) and gated on `spellcheck::start()`, so a unit test never calls
+main-thread AppKit; stale marks are clamped to character boundaries between an
+edit and the next check. No auto-correction and no grammar checking on purpose.
+A right-click on a marked word opens a context menu at the pointer with up to
+five of `NSSpellChecker`'s suggestions (best first) and **Learn spelling**, which
+writes the word to the user's own macOS dictionary and re-checks so the mark it
+came from goes away. Only a *marked* word opens it — the squiggle is the promise
+that the word was checked — and the caret does not move under an open menu. The
+rows act on release rather than `on_click`: they are deferred children of the
+composer, where the press→release pairing does not survive the frame the press
+itself triggers (measured in the test below). Settings → Agent → Check spelling
+(default on) is the switch, stored in `ui.json`; the row appears only on macOS
+because the other platforms have no checker in this stack. Unit tests cover the
+prose/exclusion rules, the UTF-16 to byte mapping, the clamp and the
+"only a marked word" rule; composer tests prove the mark pass preserves the
+covered length, that a suggestion replaces exactly the marked word, and — with a
+real layout, a right-click and a release on a row — that the menu paints at the
+pointer and applies the choice. GPUI tests cover the switch's platform presence
+and the gate; the AppKit round trip in the running app is not yet verified by
+hand.
+
 The sidebar's Git button carries a dot when there is something to look at, and
 its tooltip names what: changed files in the working tree, and issues or pull
 requests opened on GitHub since the user last viewed that tab. The Git page's
@@ -821,7 +850,11 @@ filter narrows the list, while a sign-in runs and while a removal is confirmed; 
 toggle is kept per provider in `provider_models_open`. A selected chip means
 the composer's picker offers that model, a click writes the hide-list
 (`hidden_models`), the context window shows where pi reports one, and Hide all / Show all
-sits beside the count. The row's **Models**/**Configure** dialog edits the ids, endpoint
+sits beside the count. Each expanded list has a **Search models…** field matching model
+ids and display names, case-insensitively. Search drafts are independent per provider/account
+and survive folding the row; an empty result keeps the field visible. Local search only
+filters chips: visibility counts and Show all / Hide all keep their section-wide scope.
+The row's **Models**/**Configure** dialog edits the ids, endpoint
 and key (the text field is the bulk-paste path; **Fetch models** adds the endpoint's ids to
 it) and does not repeat the list.
 
@@ -1084,6 +1117,18 @@ item rather than an empty slot, and `↑n`/`↓n` appear only for non-zero count
 session row carries no hover-revealed `…`, which is why the title owns the full
 line width and why the keyboard/palette delete path anchors its confirmation to
 the row itself.
+
+The session hover/keyboard preview card groups title and optional prompt summary,
+then folder/workspace and its full monospace path, with branch and divergence on
+a separate row with the same icon/text columns (no nested branch indent).
+All provider/model labels wrap in full; the card uses a definite viewport-derived
+width and maximum height with vertical scrolling instead of hiding metadata.
+The optional Open shortcut is a quiet divided footer. Compact grouping and explicit
+1.3 line height retain readability. Shared floating elevation, the 500 ms opening
+delay, cached data and keyboard preview path remain; a 200 ms leave grace permits
+pointer handoff into the card for scrolling, including a keyboard-opened preview.
+No I/O is added to rendering. Native screen-reader semantics, keyboard-only scrolling
+of preview contents and on-device visual verification remain unverified.
 
 Session rows show execution status independently of read/unread state. The same
 `SessionExecution` reducer consumes the foreground and parked sessions' real pi

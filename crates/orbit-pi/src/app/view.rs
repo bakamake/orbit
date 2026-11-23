@@ -127,7 +127,16 @@ pub(super) fn titlebar_controls_left(sidebar_visible: bool, sidebar_width: f32) 
 /// own), rounded corners, a hairline, and a clipped body. Keeps the top bar
 /// and the session context in place instead of swapping the whole column for
 /// an edge-to-edge page.
-fn feature_card(theme: Theme, body: AnyElement, trailing_gutter: bool) -> AnyElement {
+/// A page under the shared top bar: Files, Git, Usage, Worktrees, or the
+/// expanded terminal. `page` names the destination for the entrance's identity
+/// (`motion::arrive`) — two different pages must never share one animation
+/// clock, or the second would inherit the first's finished fade.
+fn feature_card(
+    theme: Theme,
+    body: AnyElement,
+    trailing_gutter: bool,
+    page: &'static str,
+) -> AnyElement {
     let gutter = panel::gutter(&theme);
     div()
         .flex_1()
@@ -155,15 +164,24 @@ fn feature_card(theme: Theme, body: AnyElement, trailing_gutter: bool) -> AnyEle
                     // a scrolled buffer never paints through the bottom arcs.
                     // The band takes the page's own canvas, rounded to the
                     // card, so it reads as the page and not as a footer.
-                    div()
-                        .size_full()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .rounded(crate::ui::style::surface::inspector_inner_radius(&theme))
-                        .bg(theme.page_canvas())
-                        .pb(crate::ui::style::surface::card_corner_clearance(&theme))
-                        .child(body),
+                    //
+                    // The entrance fades the page *inside* a card that is
+                    // already there: the canvas stays opaque, so nothing flashes
+                    // the wallpaper through the swap.
+                    crate::motion::arrive(
+                        div()
+                            .size_full()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .rounded(crate::ui::style::surface::inspector_inner_radius(&theme))
+                            .bg(theme.page_canvas())
+                            .pb(crate::ui::style::surface::card_corner_clearance(&theme))
+                            .child(body),
+                        page,
+                        &theme,
+                        crate::theme::tokens::Motion::Layout,
+                    ),
                 ),
         )
         .into_any_element()
@@ -463,6 +481,10 @@ impl Render for OrbitApp {
         let pane_full = pane_visible && self.sidepane.read(cx).is_full_width();
         if pane_full && !self.pane_full_last && !self.sidebar_visible {
             self.sidebar_visible = true;
+            // Settled, not slid: the slide would expose the session view through
+            // the widening gap for its whole duration, and the reader asked for
+            // the review, not for a look at the chat.
+            crate::motion::panel::settle(crate::motion::panel::SIDEBAR, true);
         }
         self.pane_full_last = pane_full;
         let sidebar_shown = sidebar_shows(self.sidebar_visible, self.settings_open, viewport.width);
@@ -807,11 +829,13 @@ impl Render for OrbitApp {
             .on_drop(cx.listener(Self::on_file_drop))
             // ── sidebar ── (hidden while the settings surface is open —
             // settings is a full-window surface with its own nav, like the
-            // reference UI). The panel stays mounted and slides: an animated
-            // outer width clips a fixed-width inner column, so the content
-            // never reflows mid-slide. The titlebar row above is outside the
-            // panel, so the controls hold their place while it moves.
-            .children((!self.settings_open).then(|| {
+            // reference UI). The panel slides through `motion::panel::slide`: an
+            // eased outer extent clips a fixed-width inner column, so the
+            // content never reflows mid-slide. The titlebar row above is outside
+            // the panel, so the controls hold their place while it moves.
+            .children(if self.settings_open {
+                None
+            } else {
                 let open = sidebar_shown;
                 let panel_w = f32::from(self.sidebar_width);
                 let panel = div()
@@ -1178,31 +1202,23 @@ impl Render for OrbitApp {
                                     .child(self.sidebar_footer_actions(theme, cx)),
                             ),
                     );
-                let gen = self.sidebar_slide_gen;
-                if gen == 0 || theme::reduce_motion(cx) {
-                    // Settled state — including the first frame, so the panel
-                    // doesn't slide open on launch.
-                    panel
-                        .w(px(if open { panel_w } else { 0. }))
-                        .into_any_element()
-                } else {
-                    panel
-                        .with_animation(
-                            ElementId::Name(format!("sidebar-slide-{gen}").into()),
-                            Animation::new(Motion::Layout.duration(&theme))
-                                .with_easing(Motion::Layout.easing()),
-                            move |el, d| {
-                                let w = if open {
-                                    panel_w * d
-                                } else {
-                                    panel_w * (1.0 - d)
-                                };
-                                el.w(px(w))
-                            },
-                        )
-                        .into_any_element()
-                }
-            }))
+                // The slide owns the outer extent and clips the panel at its
+                // settled width, so the sidebar's own content never reflows on
+                // the way in or out. It stays mounted while closed (at zero
+                // extent) because ⌘⇧B focuses the column through
+                // `sidebar_focus`, which has to be in the tree to receive it.
+                crate::motion::slide(
+                    crate::motion::Slide {
+                        name: crate::motion::panel::SIDEBAR,
+                        open,
+                        extent: px(panel_w),
+                        anchor: crate::motion::Anchor::Left,
+                        mount: crate::motion::Mount::Always,
+                    },
+                    &theme,
+                    || panel.w(px(panel_w)).into_any_element(),
+                )
+            })
             // ── main ──
             .child(if self.settings_open {
                 // Settings owns the whole column — it has its own nav.
@@ -1312,27 +1328,14 @@ impl Render for OrbitApp {
                             }
                         })
                         .child(top_controls);
-                    let gen = self.sidebar_slide_gen;
-                    if gen == 0 || theme::reduce_motion(cx) {
-                        bar.pl(px(if sidebar_shown { 20. } else { TITLEBAR_LEADING }))
-                            .into_any_element()
-                    } else {
-                        let expanding = sidebar_shown;
-                        bar.with_animation(
-                            ElementId::Name(format!("topbar-lead-{gen}").into()),
-                            Animation::new(Motion::Layout.duration(&theme))
-                                .with_easing(Motion::Layout.easing()),
-                            move |el, d| {
-                                let (from, to) = if expanding {
-                                    (TITLEBAR_LEADING, 20.)
-                                } else {
-                                    (20., TITLEBAR_LEADING)
-                                };
-                                el.pl(px(from + (to - from) * d))
-                            },
-                        )
+                    // The lead rides the sidebar's own slide instead of animating
+                    // its own clock: `panel_slide` asks for the frames, so
+                    // reading its progress here cannot drift from the panel.
+                    let settled = if sidebar_shown { 1.0 } else { 0.0 };
+                    let progress =
+                        crate::motion::panel::progress(crate::motion::panel::SIDEBAR, settled);
+                    bar.pl(px(TITLEBAR_LEADING + (20. - TITLEBAR_LEADING) * progress))
                         .into_any_element()
-                    }
                 };
                 let body: AnyElement = if pane_full {
                     // The expanded Review pane owns the page; the chat is not
@@ -1663,12 +1666,26 @@ impl Render for OrbitApp {
                         // mounted at all in a session.
                         .children(gap)
                         // bottom terminal panel — the last row of the page, under
-                        // the composer, so it hugs the window's bottom edge. An
-                        // expanded panel is the page itself (see below).
-                        .children(
-                            (terminal_visible && !terminal_full)
-                                .then(|| self.terminal_panel.clone().into_any_element()),
-                        )
+                        // the composer, so it hugs the window's bottom edge. It
+                        // slides on its own height like every other panel: the
+                        // strip stays mounted while it closes, flush with the
+                        // bottom edge, and the transcript above takes the height
+                        // back on the same curve. An expanded panel is the page
+                        // itself (see below), so it is not this row.
+                        .children(crate::motion::slide(
+                            crate::motion::Slide {
+                                name: crate::motion::panel::TERMINAL,
+                                // The panel's own state, not `terminal_visible`:
+                                // a surface that hides the chat column must not
+                                // read as the terminal closing.
+                                open: self.terminal_panel.read(cx).is_open(),
+                                extent: self.terminal_panel.read(cx).height(),
+                                anchor: crate::motion::Anchor::Bottom,
+                                mount: crate::motion::Mount::WhileOpen,
+                            },
+                            &theme,
+                            || self.terminal_panel.clone().into_any_element(),
+                        ))
                         .into_any_element()
                 };
                 // The top bar stays put; a feature page opens as a card below
@@ -1713,7 +1730,20 @@ impl Render for OrbitApp {
                             .child(if pane_full {
                                 div().into_any_element()
                             } else if feature_open {
-                                feature_card(theme, body, !dock_visible)
+                                // Which page owns the column, for the entrance's
+                                // identity: two destinations must not share one
+                                // animation clock. The order matches
+                                // `feature_open`'s own composition.
+                                let page = if viewer_open {
+                                    "page-files"
+                                } else if self.git_open {
+                                    "page-git"
+                                } else if self.usage_open {
+                                    "page-usage"
+                                } else {
+                                    "page-worktrees"
+                                };
+                                feature_card(theme, body, !dock_visible, page)
                             } else if terminal_full {
                                 // The expanded shell owns the page the way Git
                                 // and Usage do: the chat is skipped and the
@@ -1722,33 +1752,12 @@ impl Render for OrbitApp {
                                     theme,
                                     self.terminal_panel.clone().into_any_element(),
                                     !dock_visible,
+                                    "page-terminal",
                                 )
                             } else {
                                 body
                             })
-                            .children(
-                                explorer_visible
-                                    .then(|| self.project_panel.clone().into_any_element()),
-                            )
-                            .children(pane_visible.then(|| {
-                                // A subagent tab paints in the same frame as
-                                // Review; Review paints itself (with the strip).
-                                match self.transcript.dock_tabs().active() {
-                                    crate::right_dock::DockTab::Subagent(_) => {
-                                        self.render_subagent_dock(
-                                            theme,
-                                            window.viewport_size().height,
-                                            cx,
-                                        )
-                                    }
-                                    crate::right_dock::DockTab::Review => {
-                                        self.sidepane.clone().into_any_element()
-                                    }
-                                }
-                            }))
-                            .children(
-                                details_visible.then(|| self.render_session_details_panel(cx)),
-                            ),
+                            .children(self.right_dock_slide(theme, window, cx)),
                     )
                     .into_any_element()
             })
@@ -1776,31 +1785,14 @@ impl Render for OrbitApp {
                     .flex()
                     .items_center()
                     .child(self.titlebar_left_controls(theme, cx));
-                let gen = self.sidebar_slide_gen;
-                if gen == 0 || theme::reduce_motion(cx) {
-                    controls
-                        .left(px(if sidebar_shown { hugging } else { pinned }))
-                        .into_any_element()
-                } else {
-                    // Same easing and duration as the panel's own slide, so the
-                    // chips ride the edge instead of snapping to it.
-                    let expanding = sidebar_shown;
-                    controls
-                        .with_animation(
-                            ElementId::Name(format!("titlebar-lead-{gen}").into()),
-                            Animation::new(Motion::Layout.duration(&theme))
-                                .with_easing(Motion::Layout.easing()),
-                            move |el, d| {
-                                let (from, to) = if expanding {
-                                    (pinned, hugging)
-                                } else {
-                                    (hugging, pinned)
-                                };
-                                el.left(px(from + (to - from) * d))
-                            },
-                        )
-                        .into_any_element()
-                }
+                // Rides the sidebar's slide, like the top bar's lead: same
+                // clock, so the chips travel the edge instead of snapping to it.
+                let settled = if sidebar_shown { 1.0 } else { 0.0 };
+                let progress =
+                    crate::motion::panel::progress(crate::motion::panel::SIDEBAR, settled);
+                controls
+                    .left(px(pinned + (hugging - pinned) * progress))
+                    .into_any_element()
             }))
             // ── window caption buttons ── the app owns the caption on the
             // platforms where it draws it (`platform::draws_window_controls`),
@@ -2016,6 +2008,8 @@ impl Render for OrbitApp {
             .on_action(cx.listener(Self::on_sidebar_move_row_up))
             .on_action(cx.listener(Self::on_sidebar_move_row_down))
             .on_action(cx.listener(Self::on_sidebar_open_row_menu))
+            .on_action(cx.listener(Self::on_sidebar_preview_up))
+            .on_action(cx.listener(Self::on_sidebar_preview_down))
             .on_action(cx.listener(Self::on_toggle_command_palette))
             // ⌘⌥P starts or stops a frame-time capture (debug builds bind the
             // chord; the body compiles away in release). Registered at the root
@@ -3045,6 +3039,92 @@ impl OrbitApp {
         } else {
             px(0.)
         }
+    }
+
+    /// The right dock's slot, sliding.
+    ///
+    /// Review (or a subagent tab), the Explorer and session details all live in
+    /// this one slot — `*_visible` makes them mutually exclusive — so they share
+    /// one slide, one width and one edge. `DESIGN.md` §Motion System names the
+    /// animated property for a panel's open and close as *the panel's own
+    /// width*, which is what `motion::panel::slide` eases; the chat column beside
+    /// it takes the space back on the same curve.
+    ///
+    /// Answers `None` once the slot is closed and at rest, so a closed dock is
+    /// not in the tree at all and costs nothing to render.
+    ///
+    /// It re-derives the three `*_visible` flags the render already computed —
+    /// they also size the chat column and the top bar — so this method can be
+    /// called on its own. Keep the two definitions in step; the pair that
+    /// would diverge is `pane_visible`'s exclusion list.
+    pub(super) fn right_dock_slide(
+        &mut self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let pane_open = self.sidepane.read(cx).is_open();
+        let explorer_visible = self.project_panel.read(cx).is_open()
+            && !self.settings_open
+            && !pane_open
+            && self.remote.is_none();
+        let pane_visible = pane_open
+            && !self.settings_open
+            && !self.usage_open
+            && self.dependencies_ready()
+            && self.remote.is_none();
+        let details_visible = self.session_details_visible(cx);
+        let open = explorer_visible || pane_visible || details_visible;
+
+        let slot = if explorer_visible {
+            RightDock::Explorer
+        } else if pane_visible {
+            RightDock::Review
+        } else if details_visible {
+            RightDock::Details
+        } else {
+            // Closing: keep painting the dock that was here. Every `*_visible`
+            // flag is already false, and the slide still has a card to move.
+            self.right_dock_slot
+        };
+        if open {
+            self.right_dock_slot = slot;
+        }
+
+        // The extent only has to survive the close, and both entities keep the
+        // width the reader dialled in after they shut; details is a constant.
+        let extent = match slot {
+            RightDock::Explorer => self.project_panel.read(cx).width(),
+            RightDock::Review => self.sidepane.read(cx).width(),
+            RightDock::Details => px(SESSION_DETAILS_GUTTER + SESSION_DETAILS_W),
+            RightDock::None => px(0.),
+        };
+
+        crate::motion::slide(
+            crate::motion::Slide {
+                name: crate::motion::panel::RIGHT_DOCK,
+                open,
+                extent,
+                anchor: crate::motion::Anchor::Right,
+                // A closed dock is not rendered at all: Review, Explorer and
+                // details each build real content every frame they are asked to.
+                mount: crate::motion::Mount::WhileOpen,
+            },
+            &theme,
+            || match slot {
+                RightDock::Explorer => self.project_panel.clone().into_any_element(),
+                // A subagent tab paints in the same frame as Review; Review
+                // paints itself, with the tab strip.
+                RightDock::Review => match self.transcript.dock_tabs().active() {
+                    crate::right_dock::DockTab::Subagent(_) => {
+                        self.render_subagent_dock(theme, window.viewport_size().height, cx)
+                    }
+                    crate::right_dock::DockTab::Review => self.sidepane.clone().into_any_element(),
+                },
+                RightDock::Details => self.render_session_details_panel(cx),
+                RightDock::None => div().into_any_element(),
+            },
+        )
     }
 
     /// The new-task composer's context header: folder and branch on the left,

@@ -624,10 +624,27 @@ impl OrbitApp {
     // real pi/runtime facts (PRODUCT.md: nothing decorative that
     // pretends to be functional).
 
-    pub(super) fn render_settings(
-        &self,
-        cx: &Context<Self>,
-    ) -> impl IntoElement + use<> {
+    pub(super) fn render_settings(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        if self.settings_section == SettingsSection::Providers {
+            // Each provider (including account aliases) keeps its own draft
+            // across collapse/reopen, without sharing the page-wide filter.
+            for view in self.provider_views() {
+                self.provider_model_filters
+                    .entry(view.id.clone())
+                    .or_insert_with(|| {
+                        let input = cx.new(|cx| {
+                            ComposerInput::new(cx)
+                                .with_element_id(format!("provider-model-filter-{}", view.id))
+                                .with_placeholder_key("app.search_models")
+                                .with_key_context("Composer Picker")
+                                .with_max_lines(1)
+                                .with_wrap(false)
+                        });
+                        let subscription = cx.observe(&input, |_, _, cx| cx.notify());
+                        (input, subscription)
+                    });
+            }
+        }
         let this = cx.entity();
         let theme = *theme::get(cx);
 
@@ -860,17 +877,48 @@ impl OrbitApp {
             // matches instead of the active section. Skills owns a full-bleed
             // master-detail surface; every other section is a fixed header + a
             // scrolling column of cards.
+            //
+            // A section is a navigation, so its content arrives with a fade
+            // (`motion::arrive`) inside a column that never moves — the nav
+            // beside it stays put. The name is the section's own label key, so
+            // the destination identifies the clock and searching (which only
+            // updates the content of one destination) does not re-fade on every
+            // keystroke.
             .child({
                 let searching = !self.settings_search.read(cx).text().trim().is_empty();
-                if searching {
-                    self.settings_search_results(theme, this.clone(), cx)
+                let (page, body) = if searching {
+                    (
+                        "settings.search",
+                        self.settings_search_results(theme, this.clone(), cx),
+                    )
                 } else if self.settings_section == SettingsSection::Skills {
-                    self.render_skills_page(theme, this.clone(), cx)
+                    (
+                        "settings.skills",
+                        self.render_skills_page(theme, this.clone(), cx),
+                    )
                 } else if self.settings_section == SettingsSection::Subagents {
-                    self.render_subagents_page(theme, this.clone(), cx)
+                    (
+                        "settings.subagents",
+                        self.render_subagents_page(theme, this.clone(), cx),
+                    )
                 } else {
-                    self.settings_body(theme, this.clone(), cx)
-                }
+                    (
+                        settings_section_meta(self.settings_section).1,
+                        self.settings_body(theme, this.clone(), cx),
+                    )
+                };
+                crate::motion::arrive(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .child(body),
+                    page,
+                    &theme,
+                    Motion::Layout,
+                )
             })
             // ── provider editor modals (models.json + API key) ──
             .children(self.provider_editor_layer(theme, this.clone(), cx))
@@ -1197,13 +1245,26 @@ impl OrbitApp {
             .gap(DynamicSpacing::Base16.px(&theme))
             .child(
                 div()
+                    .debug_selector(|| "about-identity-mark".to_string())
                     .flex_none()
+                    // A definite box: the mark is a height-driven image, so its
+                    // width would otherwise come from the decoded asset and the
+                    // identity row would reflow when it arrived.
+                    .size(IconSize::XLarge.px(&theme))
                     .child(embedded_image(
                         crate::app_icon::ASSET,
                         f32::from(IconSize::XLarge.px(&theme)),
                     )),
             )
-            .child(text)
+            // The identity text takes the row's remaining width, so the
+            // subtitle and the version line wrap at the page rather than at the
+            // title's own width. It is `flex_1` *here* and not on `text`
+            // itself: every other section hands this column to a column parent,
+            // where growing would stretch the header instead of widening it.
+            .child(
+                text.flex_1()
+                    .debug_selector(|| "about-identity-text".to_string()),
+            )
             .into_any_element()
     }
 
@@ -2461,7 +2522,7 @@ impl OrbitApp {
                         // models rather than the provider itself.
                         let narrowed =
                             favorites_only || (!needle.is_empty() && !provider_hit(view));
-                        self.provider_row(view, &models, narrowed, theme, this.clone())
+                        self.provider_row(view, &models, narrowed, theme, this.clone(), cx)
                     })
                     .collect();
                 rows.push(
@@ -3061,6 +3122,7 @@ impl OrbitApp {
         narrowed: bool,
         theme: Theme,
         this: Entity<OrbitApp>,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let confirming = self.provider_remove_confirm.as_deref() == Some(view.id.as_str());
         // Usage opens in a popup (see `provider_usage_layer`).
@@ -3523,7 +3585,7 @@ impl OrbitApp {
                 })
                 .children(auth_section)
                 .when(!models.is_empty(), |panel| {
-                    panel.child(self.provider_model_list(&view.id, models, theme, this.clone()))
+                    panel.child(self.provider_model_list(&view.id, models, theme, this.clone(), cx))
                 })
         });
 
@@ -3567,7 +3629,25 @@ impl OrbitApp {
         models: &[&ModelEntry],
         theme: Theme,
         this: Entity<OrbitApp>,
+        cx: &Context<Self>,
     ) -> AnyElement {
+        let filter = self
+            .provider_model_filters
+            .get(provider)
+            .map(|(input, _)| input);
+        let needle = filter
+            .map(|input| input.read(cx).text().trim().to_lowercase())
+            .unwrap_or_default();
+        let matches: Vec<_> = models
+            .iter()
+            .copied()
+            .filter(|model| {
+                model.id.to_lowercase().contains(&needle)
+                    || model.name.to_lowercase().contains(&needle)
+            })
+            .collect();
+        // Visibility counts and bulk actions retain their section-wide scope;
+        // typing a local search never silently changes what "all" means.
         let hidden = crate::hidden_models::all();
         let shown = models
             .iter()
@@ -3582,7 +3662,7 @@ impl OrbitApp {
             .grid_cols(2)
             .gap(DynamicSpacing::Base04.px(&theme))
             .children(
-                models
+                matches
                     .iter()
                     .map(|model| self.provider_model_chip(model, &hidden, theme, this.clone())),
             );
@@ -3662,6 +3742,22 @@ impl OrbitApp {
                             )
                             .child(bulk),
                     )
+                    .children(filter.map(|input| {
+                        search_field(input.clone(), &theme)
+                            .w_full()
+                            .debug_selector({
+                                let provider = provider.to_string();
+                                move || format!("provider-model-search-{provider}")
+                            })
+                    }))
+                    .when(matches.is_empty(), |panel| {
+                        panel.child(
+                            div()
+                                .text_size(TextSize::Small.px(&theme))
+                                .text_color(theme.text_muted)
+                                .child(tr!("settings.no_models_match")),
+                        )
+                    })
                     .child(scroll),
             )
             .into_any_element()
@@ -5144,7 +5240,26 @@ impl OrbitApp {
         this: Entity<OrbitApp>,
         cx: &Context<Self>,
     ) -> Vec<AnyElement> {
-        let behavior = vec![
+        let mut behavior = Vec::new();
+        // Spelling is AppKit's checker, so the switch only exists where it can
+        // actually mark words: a toggle that did nothing on Windows or Linux
+        // would be a lie.
+        if cfg!(target_os = "macos") {
+            behavior.push(self.setting_row(
+                theme,
+                &tr!("settings.check_spelling"),
+                Some(&tr!("settings.check_spelling_hint")),
+                None,
+                Some(self.settings_toggle(
+                    "spell-check-toggle",
+                    theme.ui.spell_check,
+                    theme,
+                    this.clone(),
+                    Self::toggle_spell_check,
+                )),
+            ));
+        }
+        behavior.extend([
             self.setting_row(
                 theme,
                 &tr!("settings.enter_while_running"),
@@ -5208,7 +5323,7 @@ impl OrbitApp {
                 None,
                 Some(self.agent_calls_select(theme, this.clone(), cx)),
             ),
-        ];
+        ]);
 
         let mut sections = Vec::new();
         if self.retrying {
@@ -5596,6 +5711,15 @@ impl OrbitApp {
     fn set_composer_send_mode(&mut self, mode: SendMode, cx: &mut Context<Self>) {
         let mut ui = theme::get(cx).ui;
         ui.composer_send_mode = mode;
+        theme::set_ui_prefs(cx, ui);
+        cx.notify();
+    }
+
+    /// Settings → Agent → Check spelling. The composer reads the pref on every
+    /// render, so an open draft picks the change up without a rebuild.
+    fn toggle_spell_check(&mut self, cx: &mut Context<Self>) {
+        let mut ui = theme::get(cx).ui;
+        ui.spell_check = !ui.spell_check;
         theme::set_ui_prefs(cx, ui);
         cx.notify();
     }
@@ -10041,6 +10165,64 @@ mod model_filter_tests {
 #[cfg(test)]
 mod about_banner_tests {
     use super::*;
+
+    /// The identity header is one compact block — mark, name, version — and the
+    /// board starts right after it.
+    ///
+    /// It regressed once. The text column was a flex item in a *row* with no
+    /// growth, so it was sized to its max-content; for a nested flex column that
+    /// is its narrowest child, the 98px title. The subtitle then wrapped into
+    /// five lines and the version line into three, the header grew to ~1500px,
+    /// and the board — the only thing on this page a reader can act on — began
+    /// 1,600px down a scrolling page in a 640px window.
+    #[gpui::test]
+    fn the_about_identity_header_stays_compact(cx: &mut gpui::TestAppContext) {
+        use crate::theme::{Theme, ThemeId};
+
+        cx.update(|cx| cx.set_global(Theme::for_id(ThemeId::Orbit)));
+        let cx = cx.add_empty_window();
+        let app = cx.update(|_, cx| cx.new(OrbitApp::new));
+        cx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.open_settings(cx);
+                app.set_settings_section(SettingsSection::About, cx);
+            })
+        });
+        let viewport = gpui::size(px(960.), px(640.));
+        let _ = cx.draw(point(px(0.), px(0.)), viewport, |_, _| app.clone());
+
+        let title = cx.debug_bounds("settings-page-title").expect("the name");
+        let mark = cx.debug_bounds("about-identity-mark").expect("the mark");
+        let text = cx
+            .debug_bounds("about-identity-text")
+            .expect("the identity text");
+        let version = cx.debug_bounds("about-version").expect("the version line");
+        let board = cx.debug_bounds("about-github").expect("the board");
+
+        assert_eq!(
+            mark.size,
+            gpui::size(px(48.), px(48.)),
+            "the mark has a definite box, not one the decoded asset supplies"
+        );
+        assert!(
+            (mark.origin.y + mark.size.height / 2. - (text.origin.y + text.size.height / 2.))
+                .abs()
+                < px(1.),
+            "the mark is centred on the identity text: {mark:?} beside {text:?}"
+        );
+        assert!(
+            text.size.width > title.size.width * 4.,
+            "the identity text takes the row's width, not the title's: {text:?} against {title:?}"
+        );
+        assert!(
+            version.size.height < px(30.),
+            "the version line is one line, not a wrapped column: {version:?}"
+        );
+        assert!(
+            board.origin.y < viewport.height,
+            "the board is on the first screen: {board:?} in {viewport:?}"
+        );
+    }
 
     /// Settings → About no longer stacks a star card over the board: the
     /// Star control lives on the Source row beside the GitHub link
