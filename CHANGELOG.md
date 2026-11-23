@@ -222,6 +222,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Git page's commit bar matches the working tree.** With nothing to
+  commit, the bar is no longer an empty "leave blank to generate" message box
+  with "Up to date" tucked into its corner: it is one row that leads with the
+  sync status (up to date, behind, diverged) and trails with Push, Pull or
+  Merge when one applies. The message editor comes back as soon as there is a
+  change to commit. The tab strip is taller, so the selected tab no longer
+  sits against the page card's rounded top corner.
 - **Security boundaries are enforced end to end.** Opening a workspace no longer
   silently grants project trust: unknown or denied workspaces use `--no-approve`,
   keep project resources and MCP secrets off, and require an explicit persisted

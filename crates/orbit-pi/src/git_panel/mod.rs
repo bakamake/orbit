@@ -4132,8 +4132,11 @@ impl GitPanel {
             ));
         }
         let changed = self.changed_file_count();
+        // The page's first row sits under the card's rounded corner: 48px
+        // centres the 28px tab with room above it, where 40px left the
+        // selected pill pressed against the corner.
         div()
-            .h(DynamicSpacing::Base40.px(&theme))
+            .h(DynamicSpacing::Base48.px(&theme))
             .flex_none()
             .px(DynamicSpacing::Base16.px(&theme))
             .flex()
@@ -4702,6 +4705,184 @@ impl GitPanel {
         } else {
             tr!("git_panel.push")
         };
+        // What the bar reports and offers: the status leads, the action
+        // trails. Only uncommitted work brings the message editor — a clean
+        // tree has nothing for a commit message to describe, so its states
+        // (in sync, push, pull, merge) are one row on the page's 16px edge.
+        let status_text = |text: String| {
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_size(TextSize::Small.px(&theme))
+                .text_color(theme.text_muted)
+                .child(text)
+        };
+        let (status, action): (Option<AnyElement>, Option<AnyElement>) = match actions {
+            BarActions::Commit => (
+                None,
+                Some(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(DynamicSpacing::Base08.px(&theme))
+                        .child(action_button(
+                            "git-commit-push",
+                            &commit_and_push_label,
+                            Some(
+                                icon(
+                                    "icons/cloud-upload.svg",
+                                    ButtonSize::Medium.icon_size().px(&theme),
+                                    theme.text_secondary,
+                                )
+                                .into_any_element(),
+                            ),
+                            false,
+                            !can_commit,
+                            theme,
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.on_commit(GitAction::CommitAndPush, cx)
+                            }),
+                        ))
+                        .child(action_button(
+                            "git-commit",
+                            &commit_label,
+                            Some(if self.generating {
+                                spinner(
+                                    "git-commit-spinner",
+                                    ButtonSize::Medium.icon_size().px(&theme),
+                                    theme.accent_text,
+                                    theme,
+                                )
+                            } else {
+                                icon(
+                                    "icons/git-commit.svg",
+                                    ButtonSize::Medium.icon_size().px(&theme),
+                                    if can_commit {
+                                        theme.action_fg
+                                    } else {
+                                        theme.text_muted
+                                    },
+                                )
+                                .into_any_element()
+                            }),
+                            true,
+                            !can_commit,
+                            theme,
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.on_commit(GitAction::Commit, cx)
+                            }),
+                        ))
+                        .into_any_element(),
+                ),
+            ),
+            BarActions::Push { publish: _ } => (
+                None,
+                Some(action_button(
+                    "git-push",
+                    &push_label,
+                    Some(
+                        icon(
+                            "icons/upload.svg",
+                            ButtonSize::Medium.icon_size().px(&theme),
+                            if busy {
+                                theme.text_muted
+                            } else {
+                                theme.action_fg
+                            },
+                        )
+                        .into_any_element(),
+                    ),
+                    true,
+                    busy,
+                    theme,
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.run_git_action(GitAction::Push, None, cx)
+                    }),
+                )),
+            ),
+            BarActions::Pull { behind } => (
+                Some(status_text(tr!("git_panel.behind", count = behind)).into_any_element()),
+                Some(action_button(
+                    "git-pull",
+                    &tr!("git_panel.pull"),
+                    Some(
+                        icon(
+                            "icons/arrow-down.svg",
+                            ButtonSize::Medium.icon_size().px(&theme),
+                            theme.text_secondary,
+                        )
+                        .into_any_element(),
+                    ),
+                    false,
+                    busy,
+                    theme,
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.run_git_action(GitAction::Pull, None, cx)
+                    }),
+                )),
+            ),
+            BarActions::Merge { behind } => (
+                Some(
+                    status_text(tr!("git_panel.diverged_behind", count = behind))
+                        .into_any_element(),
+                ),
+                Some(action_button(
+                    "git-merge",
+                    &tr!("git_panel.merge"),
+                    Some(
+                        icon(
+                            "icons/git-merge.svg",
+                            ButtonSize::Medium.icon_size().px(&theme),
+                            theme.text_secondary,
+                        )
+                        .into_any_element(),
+                    ),
+                    false,
+                    busy,
+                    theme,
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.run_git_action(GitAction::Merge, None, cx)
+                    }),
+                )),
+            ),
+            // In sync: the label reads on its own; the check only reinforces it.
+            BarActions::UpToDate => (
+                Some(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap(DynamicSpacing::Base06.px(&theme))
+                        .child(icon(
+                            "icons/circle-check.svg",
+                            IconSize::Small.px(&theme),
+                            theme.success,
+                        ))
+                        .child(status_text(tr!("git_panel.up_to_date").to_string()))
+                        .into_any_element(),
+                ),
+                None,
+            ),
+        };
+        if !matches!(actions, BarActions::Commit) {
+            // One row as tall as the tab strip: the same height in every
+            // clean-tree state, so a push or pull settling moves nothing.
+            return div()
+                .debug_selector(|| "git-sync-status".into())
+                .flex_none()
+                .h(DynamicSpacing::Base48.px(&theme))
+                .px(DynamicSpacing::Base16.px(&theme))
+                .border_t_1()
+                .border_color(theme.hairline())
+                .flex()
+                .items_center()
+                .gap(DynamicSpacing::Base08.px(&theme))
+                .children(status)
+                .child(div().flex_1())
+                .children(action)
+                .into_any_element();
+        }
         div()
             .flex_none()
             .px(DynamicSpacing::Base20.px(&theme))
@@ -4719,6 +4900,7 @@ impl GitPanel {
                 // and Cmd/Ctrl+Enter commits.
                 div()
                     .id("git-commit-box")
+                    .debug_selector(|| "git-commit-box".into())
                     .w_full()
                     .min_w_0()
                     .flex()
@@ -4830,148 +5012,7 @@ impl GitPanel {
                                             })),
                                     )
                             }))
-                            .child(match actions {
-                                BarActions::Commit => div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(DynamicSpacing::Base08.px(&theme))
-                                    .child(action_button(
-                                        "git-commit-push",
-                                        &commit_and_push_label,
-                                        Some(
-                                            icon(
-                                                "icons/cloud-upload.svg",
-                                                ButtonSize::Medium.icon_size().px(&theme),
-                                                theme.text_secondary,
-                                            )
-                                            .into_any_element(),
-                                        ),
-                                        false,
-                                        !can_commit,
-                                        theme,
-                                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                                            this.on_commit(GitAction::CommitAndPush, cx)
-                                        }),
-                                    ))
-                                    .child(action_button(
-                                        "git-commit",
-                                        &commit_label,
-                                        Some(if self.generating {
-                                            spinner(
-                                                "git-commit-spinner",
-                                                ButtonSize::Medium.icon_size().px(&theme),
-                                                theme.accent_text,
-                                                theme,
-                                            )
-                                        } else {
-                                            icon(
-                                                "icons/git-commit.svg",
-                                                ButtonSize::Medium.icon_size().px(&theme),
-                                                if can_commit {
-                                                    theme.action_fg
-                                                } else {
-                                                    theme.text_muted
-                                                },
-                                            )
-                                            .into_any_element()
-                                        }),
-                                        true,
-                                        !can_commit,
-                                        theme,
-                                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                                            this.on_commit(GitAction::Commit, cx)
-                                        }),
-                                    ))
-                                    .into_any_element(),
-                                BarActions::Push { publish: _ } => action_button(
-                                    "git-push",
-                                    &push_label,
-                                    Some(
-                                        icon(
-                                            "icons/upload.svg",
-                                            ButtonSize::Medium.icon_size().px(&theme),
-                                            if busy {
-                                                theme.text_muted
-                                            } else {
-                                                theme.action_fg
-                                            },
-                                        )
-                                        .into_any_element(),
-                                    ),
-                                    true,
-                                    busy,
-                                    theme,
-                                    cx.listener(|this, _: &ClickEvent, _, cx| {
-                                        this.run_git_action(GitAction::Push, None, cx)
-                                    }),
-                                ),
-                                BarActions::Pull { behind } => div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(DynamicSpacing::Base08.px(&theme))
-                                    .child(
-                                        div()
-                                            .text_size(TextSize::Small.px(&theme))
-                                            .text_color(theme.text_muted)
-                                            .child(tr!("git_panel.behind", count = behind)),
-                                    )
-                                    .child(action_button(
-                                        "git-pull",
-                                        &tr!("git_panel.pull"),
-                                        Some(
-                                            icon(
-                                                "icons/arrow-down.svg",
-                                                ButtonSize::Medium.icon_size().px(&theme),
-                                                theme.text_secondary,
-                                            )
-                                            .into_any_element(),
-                                        ),
-                                        false,
-                                        busy,
-                                        theme,
-                                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                                            this.run_git_action(GitAction::Pull, None, cx)
-                                        }),
-                                    ))
-                                    .into_any_element(),
-                                BarActions::Merge { behind } => div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(DynamicSpacing::Base08.px(&theme))
-                                    .child(
-                                        div()
-                                            .text_size(TextSize::Small.px(&theme))
-                                            .text_color(theme.text_muted)
-                                            .child(tr!(
-                                                "git_panel.diverged_behind",
-                                                count = behind
-                                            )),
-                                    )
-                                    .child(action_button(
-                                        "git-merge",
-                                        &tr!("git_panel.merge"),
-                                        Some(
-                                            icon(
-                                                "icons/git-merge.svg",
-                                                ButtonSize::Medium.icon_size().px(&theme),
-                                                theme.text_secondary,
-                                            )
-                                            .into_any_element(),
-                                        ),
-                                        false,
-                                        busy,
-                                        theme,
-                                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                                            this.run_git_action(GitAction::Merge, None, cx)
-                                        }),
-                                    ))
-                                    .into_any_element(),
-                                BarActions::UpToDate => div()
-                                    .text_size(TextSize::Small.px(&theme))
-                                    .text_color(theme.text_muted)
-                                    .child(tr!("git_panel.up_to_date"))
-                                    .into_any_element(),
-                            }),
+                            .children(action)
                     ),
             )
             .into_any_element()
@@ -10739,6 +10780,84 @@ fn commit_separator(theme: Theme) -> AnyElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Draws only the Git page's commit bar, pinned to the window's foot.
+    struct CommitBarProbe(Entity<GitPanel>);
+
+    impl Render for CommitBarProbe {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let theme = *theme::get(cx);
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .justify_end()
+                .child(self.0.update(cx, |panel, cx| panel.commit_bar(theme, cx)))
+        }
+    }
+
+    /// Draws the commit bar for one git state in a fresh window and returns
+    /// the bounds of its status row and its commit box. gpui 0.2.2 keeps a
+    /// window's debug bounds across frames, so each state gets its own window
+    /// for an absence to mean anything.
+    fn commit_bar_in(
+        cx: &mut gpui::TestAppContext,
+        setup: impl FnOnce(&mut GitPanel),
+    ) -> (Option<Bounds<Pixels>>, Option<Bounds<Pixels>>, Pixels) {
+        let cx = cx.add_empty_window();
+        let panel = cx.update(|_, cx| {
+            cx.set_global(Theme::for_id(crate::theme::ThemeId::Orbit));
+            cx.new(GitPanel::new)
+        });
+        cx.update(|_, cx| panel.update(cx, |panel, _| setup(panel)));
+        let probe = cx.update(|_, cx| cx.new(|_| CommitBarProbe(panel.clone())));
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(900.), px(400.)),
+            |_, _| probe.clone(),
+        );
+        let row_h = cx.update(|_, cx| DynamicSpacing::Base48.px(theme::get(cx)));
+        (
+            cx.debug_bounds("git-sync-status"),
+            cx.debug_bounds("git-commit-box"),
+            row_h,
+        )
+    }
+
+    #[gpui::test]
+    fn only_uncommitted_work_opens_the_commit_message_editor(cx: &mut gpui::TestAppContext) {
+        // Every clean-tree state — in sync, push, publish, pull, diverged — is
+        // one status row as tall as the tab strip, with no message field.
+        for ahead_behind in [Some((0, 0)), Some((2, 0)), None, Some((0, 3)), Some((2, 3))] {
+            let (row, commit_box, row_h) = commit_bar_in(cx, |panel| {
+                panel.ahead_behind = ahead_behind;
+                panel.has_commits = true;
+            });
+            let row = row.unwrap_or_else(|| panic!("{ahead_behind:?}: no status row"));
+            assert_eq!(row.size.height, row_h, "{ahead_behind:?}");
+            assert!(
+                commit_box.is_none(),
+                "{ahead_behind:?}: a clean tree offers no commit message"
+            );
+        }
+
+        // A working-tree change brings the composer-style commit box back.
+        let (row, commit_box, _) = commit_bar_in(cx, |panel| {
+            panel.has_commits = true;
+            panel.unstaged = vec![git::StatusRow {
+                path: "src/main.rs".into(),
+                orig_path: None,
+                index: ' ',
+                worktree: 'M',
+                staged_additions: 0,
+                staged_deletions: 0,
+                unstaged_additions: 3,
+                unstaged_deletions: 1,
+            }];
+        });
+        assert!(commit_box.is_some());
+        assert!(row.is_none());
+    }
 
     #[gpui::test]
     fn github_drafts_follow_items_and_reset_with_workspace(cx: &mut gpui::TestAppContext) {
