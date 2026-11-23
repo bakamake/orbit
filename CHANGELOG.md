@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-11-24
+
 - **Decision cards lay their options out on a line again.** The inline "Decision needed"
 card (an extension's `select`, such as *Finish review*) and the questionnaire panel share
 `ChoiceRow`, whose label sat in a wrapping flex row with an auto basis and `min_w_0`. That
@@ -3005,7 +3007,7 @@ not asked on every turn.
 - In-transcript find (⌘F) and a full-window image lightbox.
 - Native macOS app bundle, Developer-ID signed and notarizable.
 
-[Unreleased]: https://github.com/imrj05/orbit/compare/v0.2.20...HEAD
+[Unreleased]: https://github.com/imrj05/orbit/compare/v0.2.21...HEAD
 [0.0.1]: https://github.com/imrj05/orbit/releases/tag/v0.0.1
 [0.0.2]: https://github.com/imrj05/orbit/releases/tag/v0.0.2
 [0.0.3]: https://github.com/imrj05/orbit/releases/tag/v0.0.3
@@ -3046,3 +3048,4 @@ not asked on every turn.
 [0.2.18]: https://github.com/imrj05/orbit/releases/tag/v0.2.18
 [0.2.19]: https://github.com/imrj05/orbit/releases/tag/v0.2.19
 [0.2.20]: https://github.com/imrj05/orbit/releases/tag/v0.2.20
+[0.2.21]: https://github.com/imrj05/orbit/releases/tag/v0.2.21
