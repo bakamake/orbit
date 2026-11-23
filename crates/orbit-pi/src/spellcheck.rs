@@ -246,15 +246,12 @@ fn is_prose_token(token: &str) -> bool {
     }
     // `API`, `JSON`, `TODO` — acronyms.
     let alphabetic = chars.iter().filter(|c| c.is_alphabetic()).count();
-    if alphabetic >= 2
+    let all_caps = alphabetic >= 2
         && chars
             .iter()
             .filter(|c| c.is_alphabetic())
-            .all(|c| c.is_uppercase())
-    {
-        return false;
-    }
-    true
+            .all(|c| c.is_uppercase());
+    !all_caps
 }
 
 // ── the platform checker ────────────────────────────────────────────────
