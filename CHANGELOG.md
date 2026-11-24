@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Release packaging no longer sinks a build on one flaky `hdiutil` call.** Hosted macOS
+runners intermittently return `hdiutil: create failed - Resource busy` while building a DMG
+(`actions/runner-images#7522`) — not a bad image, a momentarily busy APFS container. It hit
+the 0.2.21 release run on the universal DMG, which aborted the macOS job *after* the arm64
+DMG had been built, signed, notarized and stapled, so no macOS artifact was uploaded at all.
+`make-dmg.sh` now retries the create with a backoff (clearing a leftover mount of the
+previous pass first, and force-detaching when a plain detach sticks), and gives each pass its
+own staging directory and writable image so arm64 and universal can no longer wedge each
+other. The draft-release job also refuses to cut the version tag when the macOS job failed:
+a release without its DMGs and updater archives is not shippable, and a published release is
+never rebuilt.
+
 ## [0.2.21] - 2026-11-24
 
 - **Decision cards lay their options out on a line again.** The inline "Decision needed"

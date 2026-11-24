@@ -389,10 +389,15 @@ jobs:
   draft-release:
     name: Draft GitHub release
     needs: [version, macos, linux, windows]
+    # macOS is the primary platform: a release without its DMGs and updater
+    # archives is not shippable, and a published release is never rebuilt — so
+    # a macOS failure must not cut the tag. Linux and Windows stay
+    # best-effort (`continue-on-error`) and only contribute what they built.
     if: >-
       always()
       && needs.version.result == 'success'
       && needs.version.outputs.skip != 'true'
+      && needs.macos.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
