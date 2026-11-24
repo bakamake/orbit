@@ -16,6 +16,11 @@
 #   NOTARY_PROFILE  notarytool keychain profile; when set, each .app and DMG
 #                   is notarized and stapled (otherwise notarization is
 #                   skipped with a warning and Gatekeeper warns on other Macs)
+#   SKIP_BUILD=1    package binaries that are already built instead of running
+#                   cargo: target/<triple>/release/orbit-pi must exist for every
+#                   triple the chosen DMGs need (the release workflow builds
+#                   each architecture in its own parallel job and drops the
+#                   binaries there)
 #
 set -euo pipefail
 
@@ -281,32 +286,53 @@ build_and_package() {
 }
 
 # --- build the release binaries -------------------------------------------
+case "$TARGET" in
+  arm64|universal|both) ;;
+  *) die "unknown target '$TARGET' (expected arm64, universal or both)" ;;
+esac
+
 mkdir -p "$BUILD_ROOT" "$DIST"
+
+release_binary() { printf '%s' "$ROOT/target/$1/release/$EXEC_NAME"; }
+
+# Build one triple's release binary, or with SKIP_BUILD=1 check that a
+# prebuilt one is in place. `rebuild=0` reuses a binary this run already built.
+ensure_binary() {
+  local triple="$1"
+  local rebuild="${2:-1}"
+  local binary
+  binary="$(release_binary "$triple")"
+  if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
+    [[ -f "$binary" ]] || die "SKIP_BUILD=1 but no prebuilt binary at $binary"
+    info "Using prebuilt release ($triple)"
+    chmod +x "$binary"
+    return 0
+  fi
+  if [[ "$rebuild" == "0" && -f "$binary" ]]; then
+    return 0
+  fi
+  info "Building release ($triple)…"
+  cargo build --release -p orbit-pi --target "$triple"
+}
 
 # arm64 (Apple Silicon)
 if [[ "$TARGET" == "arm64" || "$TARGET" == "both" ]]; then
-  info "Building release (aarch64-apple-darwin)…"
-  cargo build --release -p orbit-pi --target aarch64-apple-darwin
+  ensure_binary aarch64-apple-darwin
   build_and_package "arm64" "aarch64-apple-darwin" \
-    "$ROOT/target/aarch64-apple-darwin/release/$EXEC_NAME"
+    "$(release_binary aarch64-apple-darwin)"
 fi
 
 # universal (arm64 + x86_64)
 if [[ "$TARGET" == "universal" || "$TARGET" == "both" ]]; then
   # lipo needs an arm64 slice; build it unless the arm64 DMG already did.
-  if [[ ! -f "$ROOT/target/aarch64-apple-darwin/release/$EXEC_NAME" ]]; then
-    info "Building release (aarch64-apple-darwin)…"
-    cargo build --release -p orbit-pi --target aarch64-apple-darwin
-  fi
-
-  info "Building release (x86_64-apple-darwin)…"
-  cargo build --release -p orbit-pi --target x86_64-apple-darwin
+  ensure_binary aarch64-apple-darwin 0
+  ensure_binary x86_64-apple-darwin
 
   info "Combining universal binary with lipo…"
   uni="$BUILD_ROOT/${EXEC_NAME}-universal"
   lipo -create \
-    "$ROOT/target/aarch64-apple-darwin/release/$EXEC_NAME" \
-    "$ROOT/target/x86_64-apple-darwin/release/$EXEC_NAME" \
+    "$(release_binary aarch64-apple-darwin)" \
+    "$(release_binary x86_64-apple-darwin)" \
     -output "$uni"
 
   build_and_package "universal" "universal" "$uni"
