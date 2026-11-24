@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Ctrl+Left/Right moves by word on Linux and Windows.** `secondary-left/right` names the
+platform's primary modifier, which off macOS is `ctrl`, so those chords jumped to the ends of
+the line and the standard word movement — already implemented and bound to `alt`-arrow — was
+unreachable. Ctrl+Left/Right and Ctrl+Shift+Left/Right now resolve to `WordLeft`/`WordRight`
+and the `Select*` pair in the composer and the Files editor; the platform block is registered
+after the line bindings so it wins by keymap precedence. Home/End still reach the line edges,
+and macOS (⌘← for the line, ⌥← for a word) is unchanged. Covered by
+`ctrl_arrow_moves_by_word_off_macos`.
+
 - **Release packaging no longer sinks a build on one flaky `hdiutil` call.** Hosted macOS
 runners intermittently return `hdiutil: create failed - Resource busy` while building a DMG
 (`actions/runner-images#7522`) — not a bad image, a momentarily busy APFS container. It hit
