@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Local sessions follow `PI_CODING_AGENT_DIR`.** The sidebar index, its watcher, the
+usage scan and the onboarding path row all located the store at `~/.pi/agent/sessions`, so a
+pi configured to keep its data elsewhere kept writing sessions Orbit could not see. They now
+resolve through pi's own agent directory — `PI_CODING_AGENT_DIR`, or `~/.pi/agent` — including
+a leading `~` in the value, which pi expands internally. `PI_CODING_AGENT_SESSION_DIR` and
+`settings.json › sessionDir` still move the store unseen; neither is wired yet.
+
 - **Release packaging no longer sinks a build on one flaky `hdiutil` call.** Hosted macOS
 runners intermittently return `hdiutil: create failed - Resource busy` while building a DMG
 (`actions/runner-images#7522`) — not a bad image, a momentarily busy APFS container. It hit
