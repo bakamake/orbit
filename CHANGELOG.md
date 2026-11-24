@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Local sessions follow `PI_CODING_AGENT_DIR`.** The sidebar index, its watcher, the
+usage scan and the onboarding path row all located the store at `~/.pi/agent/sessions`, so a
+pi configured to keep its data elsewhere kept writing sessions Orbit could not see. They now
+resolve through pi's own agent directory — `PI_CODING_AGENT_DIR`, or `~/.pi/agent` — including
+a leading `~` in the value, which pi expands internally. `PI_CODING_AGENT_SESSION_DIR` and
+`settings.json › sessionDir` still move the store unseen; neither is wired yet.
+
 - **Ctrl+Left/Right moves by word on Linux and Windows.** `secondary-left/right` names the
 platform's primary modifier, which off macOS is `ctrl`, so those chords jumped to the ends of
 the line and the standard word movement — already implemented and bound to `alt`-arrow — was

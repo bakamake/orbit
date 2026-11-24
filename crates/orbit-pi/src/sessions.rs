@@ -1,7 +1,9 @@
 //! Session discovery — reads pi's own session store from disk.
 //!
-//! Layout: `~/.pi/agent/sessions/<workspace-slug>/<timestamp>_<uuid>.jsonl`
-//! where `<workspace-slug>` is the workspace absolute path with `/` → `-`.
+//! Layout: `<agent dir>/sessions/<workspace-slug>/<timestamp>_<uuid>.jsonl`,
+//! where `<agent dir>` is `PI_CODING_AGENT_DIR` or its `~/.pi/agent` default
+//! (the directory pi resolves for itself) and `<workspace-slug>` is the
+//! workspace absolute path with `/` → `-`.
 //! Each file is JSONL; the first line is the session header
 //! (`{"type":"session","id":…,"cwd":…}`) followed by entries
 //! (`message`, `model_change`, …). Titles come from pi's own auto-title
@@ -50,11 +52,7 @@ pub struct SessionInfo {
 
 /// The default pi session store.
 pub fn sessions_dir() -> PathBuf {
-    dirs_home().join(".pi/agent/sessions")
-}
-
-fn dirs_home() -> PathBuf {
-    crate::platform::home_dir()
+    crate::pi_install::agent_dir().join("sessions")
 }
 
 /// Load every session in pi's store, newest-*user message* first.
