@@ -473,9 +473,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("right", Right, Some("Composer")),
         KeyBinding::new("shift-left", SelectLeft, Some("Composer")),
         KeyBinding::new("shift-right", SelectRight, Some("Composer")),
-        // Text-field conventions: the primary modifier (Cmd on macOS, Ctrl
-        // elsewhere) + Left/Right jumps to the ends of the line (or the
-        // wrapped row); Alt+Left/Right moves word by word.
+        // macOS: Cmd+Left/Right jumps to line ends; Alt+Left/Right moves by word.
         KeyBinding::new("secondary-left", LineLeft, Some("Composer")),
         KeyBinding::new("secondary-right", LineRight, Some("Composer")),
         KeyBinding::new("secondary-shift-left", SelectLineLeft, Some("Composer")),
@@ -715,6 +713,18 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // disclosure button.
         KeyBinding::new("enter", ActivityToggle, Some("ActivityToggle")),
         KeyBinding::new("space", ActivityToggle, Some("ActivityToggle")),
+    ]);
+    // Ctrl+arrow moves by word off macOS; registered later so it wins over secondary-left/right.
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([
+        KeyBinding::new("ctrl-left", WordLeft, Some("Composer")),
+        KeyBinding::new("ctrl-right", WordRight, Some("Composer")),
+        KeyBinding::new("ctrl-shift-left", SelectWordLeft, Some("Composer")),
+        KeyBinding::new("ctrl-shift-right", SelectWordRight, Some("Composer")),
+        KeyBinding::new("ctrl-left", WordLeft, Some("Editor")),
+        KeyBinding::new("ctrl-right", WordRight, Some("Editor")),
+        KeyBinding::new("ctrl-shift-left", SelectWordLeft, Some("Editor")),
+        KeyBinding::new("ctrl-shift-right", SelectWordRight, Some("Editor")),
     ]);
 }
 
