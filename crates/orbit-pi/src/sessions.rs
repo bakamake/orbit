@@ -50,11 +50,7 @@ pub struct SessionInfo {
 
 /// The default pi session store.
 pub fn sessions_dir() -> PathBuf {
-    dirs_home().join(".pi/agent/sessions")
-}
-
-fn dirs_home() -> PathBuf {
-    crate::platform::home_dir()
+    crate::pi_install::agent_dir().join("sessions")
 }
 
 /// Load every session in pi's store, newest-*user message* first.
