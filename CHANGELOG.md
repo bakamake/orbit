@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Selecting back rightward shrinks a leftward word selection.** After Ctrl/Alt+Shift+Left
+selected words leftward, Ctrl/Alt+Shift+Right started from the selection's right end and the
+whole leftward selection was dropped. `select_word_right` now starts from the caret end
+(`cursor_offset()`), so selecting back shrinks the selection toward the anchor the way a
+native text field does.
+
 - **Local sessions follow `PI_CODING_AGENT_DIR`.** The sidebar index, its watcher, the
 usage scan and the onboarding path row all located the store at `~/.pi/agent/sessions`, so a
 pi configured to keep its data elsewhere kept writing sessions Orbit could not see. They now
