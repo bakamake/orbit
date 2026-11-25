@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - **Ctrl/Alt+Backspace deletes a word.** Ctrl+Backspace (Linux/Windows) and ⌥Backspace (macOS)
-in the composer and the Explorer editor deleted a single character. A new `DeleteWordBackward`
+in the composer and the Explorer editor were unbound, so the keystroke did nothing. A new
+`DeleteWordBackward`
 action selects to the previous word boundary — the same boundary Ctrl/Alt+Left moves to — and
 deletes through the existing backspace path, so the IME composition guard, the undo stack and
 the empty-selection no-op all hold; the two chords point at one action in both text contexts.
