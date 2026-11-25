@@ -12,6 +12,12 @@ selected words leftward, Ctrl/Alt+Shift+Right started from the selection's right
 whole leftward selection was dropped. `select_word_right` now starts from the caret end
 (`cursor_offset()`), so selecting back shrinks the selection toward the anchor the way a
 native text field does.
+- **Ctrl/Alt+Backspace deletes a word.** Ctrl+Backspace (Linux/Windows) and ⌥Backspace (macOS)
+in the composer and the Explorer editor were unbound, so the keystroke did nothing. A new
+`DeleteWordBackward`
+action selects to the previous word boundary — the same boundary Ctrl/Alt+Left moves to — and
+deletes through the existing backspace path, so the IME composition guard, the undo stack and
+the empty-selection no-op all hold; the two chords point at one action in both text contexts.
 
 - **Local sessions follow `PI_CODING_AGENT_DIR`.** The sidebar index, its watcher, the
 usage scan and the onboarding path row all located the store at `~/.pi/agent/sessions`, so a
@@ -19,6 +25,21 @@ pi configured to keep its data elsewhere kept writing sessions Orbit could not s
 resolve through pi's own agent directory — `PI_CODING_AGENT_DIR`, or `~/.pi/agent` — including
 a leading `~` in the value, which pi expands internally. `PI_CODING_AGENT_SESSION_DIR` and
 `settings.json › sessionDir` still move the store unseen; neither is wired yet.
+
+- **Opening a large folder no longer freezes the window.** The Explorer built its
+whole tree — one insert per entry, then a sort per directory — *after* the
+background walk returned, on the UI thread. A folder holding many files in one
+directory made that quadratic, because every insert scanned the siblings already
+there: 20 000 files in a single folder cost ~1.5 s of the main thread, which is the
+beachball in the report. The build now runs in the same background task as the
+walk and the UI thread only stores the finished index. The insert itself is
+linear — the snapshot is sorted by path component before it is walked, so a
+sibling that already exists is always the last child — which is ~60× faster on a
+wide directory and leaves wide workspaces unaffected. The walk also bumps a
+generation on a workspace switch or the hidden-files toggle, and a superseded
+walk now hands the `loading` slot to the request it superseded instead of
+dropping it (the panel could previously sit on a spinner until another event
+arrived), and `render` no longer re-flattens the whole tree on every frame.
 
 - **Ctrl+Left/Right moves by word on Linux and Windows.** `secondary-left/right` names the
 platform's primary modifier, which off macOS is `ctrl`, so those chords jumped to the ends of
