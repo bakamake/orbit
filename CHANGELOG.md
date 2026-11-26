@@ -15,6 +15,11 @@ watcher, the retention scan, Usage and the Settings path row now prefer
 `PI_CODING_AGENT_SESSION_DIR` (a leading `~` expanded, empty values ignored) and fall back to
 the agent directory's `sessions/`. `settings.json › sessionDir` remains unwired.
 
+- **Selecting back rightward shrinks a leftward word selection.** After Ctrl/Alt+Shift+Left
+selected words leftward, Ctrl/Alt+Shift+Right started from the selection's right end and the
+whole leftward selection was dropped. `select_word_right` now starts from the caret end
+(`cursor_offset()`), so selecting back shrinks the selection toward the anchor the way a
+native text field does.
 - **Ctrl/Alt+Backspace deletes a word.** Ctrl+Backspace (Linux/Windows) and ⌥Backspace (macOS)
 in the composer and the Explorer editor were unbound, so the keystroke did nothing. A new
 `DeleteWordBackward`
