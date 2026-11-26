@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Selecting back rightward shrinks a leftward word selection.** After Ctrl/Alt+Shift+Left
+selected words leftward, Ctrl/Alt+Shift+Right started from the selection's right end and the
+whole leftward selection was dropped. `select_word_right` now starts from the caret end
+(`cursor_offset()`), so selecting back shrinks the selection toward the anchor the way a
+native text field does.
 - **Ctrl/Alt+Backspace deletes a word.** Ctrl+Backspace (Linux/Windows) and ⌥Backspace (macOS)
 in the composer and the Explorer editor were unbound, so the keystroke did nothing. A new
 `DeleteWordBackward`
