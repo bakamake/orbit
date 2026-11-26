@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Swap-hover buttons render under Reduce Motion.** Tinted, Danger, Destructive and Glass
+buttons carry their one-frame hover swap from `variant_treatment`; under Reduce Motion the
+zero-duration branch of `motion::fade` set a second hover style on the same element, and
+gpui's debug assertion (`hover style already set`) ended the process — Settings → Subagents
+was the reported crash site. The branch now applies its hover closure only when the `Hover`
+carries a fill or ink, so a variant's own swap stays the single hover style and every page
+using these variants renders under Reduce Motion.
+
 - **Ctrl/Alt+Backspace deletes a word.** Ctrl+Backspace (Linux/Windows) and ⌥Backspace (macOS)
 in the composer and the Explorer editor were unbound, so the keystroke did nothing. A new
 `DeleteWordBackward`
