@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Local sessions follow `PI_CODING_AGENT_SESSION_DIR`.** pi resolves its session store as
+`--session-dir` > `PI_CODING_AGENT_SESSION_DIR` > `settings.json › sessionDir` >
+`$agentDir/sessions`; Orbit passes no `--session-dir`, so a user who set the environment
+variable still got an empty sidebar after the agent-directory fix. The session index, its
+watcher, the retention scan, Usage and the Settings path row now prefer
+`PI_CODING_AGENT_SESSION_DIR` (a leading `~` expanded, empty values ignored) and fall back to
+the agent directory's `sessions/`. `settings.json › sessionDir` remains unwired.
+
 - **Ctrl/Alt+Backspace deletes a word.** Ctrl+Backspace (Linux/Windows) and ⌥Backspace (macOS)
 in the composer and the Explorer editor were unbound, so the keystroke did nothing. A new
 `DeleteWordBackward`
@@ -18,8 +26,8 @@ the empty-selection no-op all hold; the two chords point at one action in both t
 usage scan and the onboarding path row all located the store at `~/.pi/agent/sessions`, so a
 pi configured to keep its data elsewhere kept writing sessions Orbit could not see. They now
 resolve through pi's own agent directory — `PI_CODING_AGENT_DIR`, or `~/.pi/agent` — including
-a leading `~` in the value, which pi expands internally. `PI_CODING_AGENT_SESSION_DIR` and
-`settings.json › sessionDir` still move the store unseen; neither is wired yet.
+a leading `~` in the value, which pi expands internally. `settings.json › sessionDir` still
+moves the store unseen; it is not wired yet.
 
 - **Opening a large folder no longer freezes the window.** The Explorer built its
 whole tree — one insert per entry, then a sort per directory — *after* the
